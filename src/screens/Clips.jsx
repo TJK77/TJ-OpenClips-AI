@@ -13,8 +13,10 @@ const FILTERS = [
 ];
 
 function seconds(d = '0:42') {
-  const parts = d.split(':').map(Number);
-  return parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+  if (typeof d === 'number') return d;
+  const parts = String(d).split(':').map(Number);
+  if (parts.some(Number.isNaN)) return 0;
+  return parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + (parts[1] || 0);
 }
 
 export default function Clips() {
