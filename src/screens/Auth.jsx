@@ -97,7 +97,8 @@ function GoogleButton({ onClick }) {
 }
 
 export function Register() {
-  const { signIn, navigate, toast } = useStore();
+  const { register, navigate, toast } = useStore();
+  const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' });
   const [show, setShow] = useState(false);
   const [terms, setTerms] = useState(true);
@@ -105,8 +106,9 @@ export function Register() {
   const strength = strengthOf(form.password);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
+    if (busy) return;
     const next = {};
     if (form.name.trim().length < 2) next.name = 'Enter your full name.';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) next.email = 'Enter a valid email address.';
@@ -115,9 +117,17 @@ export function Register() {
     if (!terms) next.terms = 'Accept the terms to continue.';
     setErrors(next);
     if (Object.keys(next).length) return;
-    signIn({ name: form.name.trim(), email: form.email, initials: form.name.trim().slice(0, 2).toUpperCase() });
-    toast('Account created — welcome to TJ OpenClips AI Studio.', 'success');
-    navigate('/dashboard');
+    setBusy(true);
+    try {
+      await register({ name: form.name.trim(), email: form.email.trim(), password: form.password });
+      toast('Account created — welcome to TJ OpenClips AI Studio.', 'success');
+      navigate('/dashboard');
+    } catch (error) {
+      setErrors({ form: error.message });
+      toast(error.message, 'error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -199,14 +209,12 @@ export function Register() {
           <span className="h-px flex-1 bg-white/10" />
         </div>
         <GoogleButton
-          onClick={() => {
-            signIn({ name: 'TJ Mercer', email: 'tj@openclips.studio', initials: 'TJ' });
-            toast('Signed in with Google (demo).', 'success');
-            navigate('/dashboard');
-          }}
+          onClick={() =>
+            toast('Google sign-in needs a Google Cloud OAuth client, which this deployment does not have. Use email and password.', 'info')
+          }
         />
         <p className="text-center text-[10.5px] leading-relaxed text-white/35">
-          Google sign-in is illustrative in this build. No external OAuth app is configured.
+          Google OAuth requires a Google Cloud client ID and secret. Email and password sign-up is fully operational.
         </p>
       </form>
     </AuthShell>
@@ -214,21 +222,31 @@ export function Register() {
 }
 
 export function SignIn() {
-  const { signIn, navigate, toast } = useStore();
-  const [email, setEmail] = useState('tj@openclips.studio');
-  const [password, setPassword] = useState('openclips');
+  const { login, navigate, toast } = useStore();
+  const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 4) {
+    if (busy) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 1) {
       setError('Enter a valid email and password.');
       return;
     }
-    signIn({ email, initials: (email[0] || 'T').toUpperCase() + 'J' });
-    toast('Welcome back.', 'success');
-    navigate('/dashboard');
+    setError('');
+    setBusy(true);
+    try {
+      await login({ email: email.trim(), password });
+      toast('Welcome back.', 'success');
+      navigate('/dashboard');
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -281,14 +299,12 @@ export function SignIn() {
           <span className="h-px flex-1 bg-white/10" />
         </div>
         <GoogleButton
-          onClick={() => {
-            signIn({});
-            toast('Signed in with Google (demo).', 'success');
-            navigate('/dashboard');
-          }}
+          onClick={() =>
+            toast('Google sign-in needs a Google Cloud OAuth client, which this deployment does not have. Use email and password.', 'info')
+          }
         />
-        <button type="button" className="btn btn-ghost w-full" onClick={() => navigate('/dashboard')}>
-          Continue with demo workspace
+        <button type="button" className="btn btn-ghost w-full" onClick={() => navigate('/register')}>
+          Create a free account
         </button>
       </form>
     </AuthShell>
