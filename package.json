@@ -1,8 +1,24 @@
 {
-  "name": "oclip-free-rea",
-  "version": "1.0.0",
+  "name": "tj-openclips-ai-studio",
   "private": true,
+  "version": "1.0.0",
   "type": "module",
-  "description": "Oclip Free by coding180: long video to captioned short clips (yt-dlp, Groq Whisper, OpenRouter, ffmpeg), with a simulated demo fallback",
-  "scripts": { "start": "node server/server.mjs" }
+  "description": "TJ OpenClips AI Studio — turn long videos into viral-ready clips, caption them and schedule them through Buffer.",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.0.11"
+  }
 }
