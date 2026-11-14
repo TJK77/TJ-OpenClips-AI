@@ -18,7 +18,7 @@ function bytes(n) {
 }
 
 export default function ImportVideo() {
-  const { navigate, patch, toast, projects, clips } = useStore();
+  const { navigate, toast, projects, clips, uploadVideo, importVideoUrl, startAnalysis } = useStore();
   const [mode, setMode] = useState('link');
   const [url, setUrl] = useState('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   const [file, setFile] = useState(null);
@@ -69,33 +69,38 @@ export default function ImportVideo() {
 
   const ready = mode === 'link' ? /^https?:\/\/.+\..+/.test(url.trim()) : !!file && !uploading;
 
-  const analyze = () => {
-    if (!ready) {
-      toast(mode === 'link' ? 'Add a video link before analysing.' : 'Wait for the upload to finish before analysing.', 'error');
+  const analyze = async () => {
+    if (!ready || busy) {
+      toast(mode === 'link' ? 'Add a video link before analysing.' : 'Choose a video file before analysing.', 'error');
       return;
     }
-    const id = `p-${Date.now()}`;
-    const newProject = {
-      id,
-      title: projectName.trim() || title.trim() || 'Untitled project',
-      source: mode === 'link' ? 'YouTube link' : file.name,
-      sourceUrl: mode === 'link' ? url.trim() : '',
-      duration: mode === 'link' ? '42:18' : '31:07',
-      durationSec: 2538,
-      clips: 0,
-      status: 'Processing',
-      created: 'Just now',
-      hue: 262,
-      hue2: 190,
-      progress: 4,
+    setBusy(true);
+    const meta = {
+      title: title.trim() || projectName.trim() || 'Untitled video',
+      project: projectName.trim() || title.trim(),
       language,
     };
-    patch({
-      projects: [newProject, ...projects],
-      analysis: { projectId: id, done: false, stage: 0 },
-    });
-    toast('Video queued — starting the AI pipeline.', 'info');
-    navigate('/analyze');
+    try {
+      let videoId;
+      if (mode === 'link') {
+        const result = await importVideoUrl({ url: url.trim(), ...meta });
+        videoId = result.video.id;
+      } else {
+        setUploading(true);
+        setUploadPct(0);
+        const result = await uploadVideo(rawFile.current, meta, (pct) => setUploadPct(pct));
+        videoId = result.video.id;
+      }
+      const wanted = Number((String(targetClips).match(/\d+/) || [8])[0]) || 8;
+      await startAnalysis({ videoId, aspect: '9:16', clipCount: wanted });
+      toast('Video queued — the server is running the real pipeline.', 'info');
+      navigate('/analyze');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      setBusy(false);
+      setUploading(false);
+    }
   };
 
   const recentSources = projects.slice(0, 3);
