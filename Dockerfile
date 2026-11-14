@@ -6,6 +6,9 @@ RUN npm install
 COPY . .
 # The build needs dev dependencies; they are removed before the copy below.
 RUN npm run build && npm prune --omit=dev
+# Never ship the local dev store: it holds test uploads and the credential
+# encryption key. The container creates a fresh data directory at startup.
+RUN rm -rf /app/data /app/tests /app/legacy-oclip
 FROM node:26-alpine
 # The date keys the build cache so this layer installs today's OS fixes; AppJet keeps it current on deploy.
 RUN echo "os-refresh 2026-11-14" && apk upgrade --no-cache
