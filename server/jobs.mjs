@@ -201,7 +201,7 @@ export async function runJob(jobId) {
     const analysisKey = providerKey(job.userId, job.analysisProvider);
     // Missing credentials are not a crash: the local detector still produces real
     // rendered MP4s. It never claims to have transcribed speech it did not read.
-    const localMode = !groqKey || !analysisKey;
+    const localMode = job.analysisMode === 'local' || !groqKey || !analysisKey;
     let transcript = { segments: [], words: [], language: 'none', text: '', wordTimings: false };
     let analysis = null;
 
