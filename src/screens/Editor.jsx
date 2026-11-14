@@ -71,6 +71,7 @@ export default function Editor() {
         <div className="space-y-3">
           <section className="card overflow-hidden">
             <div className="flex flex-wrap items-center gap-1.5 border-b border-white/8 px-2.5 py-2">
+              <span className="mr-0.5 text-[9.5px] font-semibold tracking-wide text-white/40">Aspect ratio</span>
               {RATIOS.map((r) => (
                 <button
                   key={r.value}
