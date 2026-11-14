@@ -265,6 +265,101 @@ function assStyle(style = {}) {
  * Cuts a real clip, reframes it to the requested aspect ratio, burns subtitles
  * when ffmpeg has the required filters, and optionally overlays a watermark.
  */
+/**
+ * Key-free moment detection.
+ *
+ * Uses ffmpeg's silencedetect filter to find where speech actually starts and
+ * stops in the extracted audio, then proposes the longest speech runs as clip
+ * candidates. This is honest about its limits: it finds speech boundaries, not
+ * meaning. It exists so a real, rendered MP4 can be produced without any AI
+ * credential — the AI path remains the default whenever a key is configured.
+ */
+export async function detectSpeechMoments(audioPath, { duration = 0, minSec = 12, maxSec = 60, count = 6 } = {}) {
+  let stderr = '';
+  try {
+    const result = await run(
+      config.ffmpeg,
+      ['-hide_banner', '-nostdin', '-i', audioPath, '-af', 'silencedetect=noise=-32dB:d=0.55', '-f', 'null', '-'],
+      { timeout: 180000 }
+    );
+    stderr = result.stderr;
+  } catch (error) {
+    // ffmpeg writes filter output to stderr and can exit non-zero on odd input;
+    // whatever it reported is still usable evidence.
+    stderr = error.stderr || String(error.message || '');
+  }
+
+  const total = Number(duration) || (await probe(audioPath).then((m) => m.duration).catch(() => 0));
+  if (!total) return [];
+
+  const silences = [];
+  let open = null;
+  for (const line of String(stderr).split('\n')) {
+    const startMatch = line.match(/silence_start:\s*(-?[\d.]+)/);
+    if (startMatch) {
+      open = Math.max(0, Number(startMatch[1]));
+      continue;
+    }
+    const endMatch = line.match(/silence_end:\s*([\d.]+)/);
+    if (endMatch && open !== null) {
+      silences.push([open, Math.min(Number(endMatch[1]), total)]);
+      open = null;
+    }
+  }
+  if (open !== null) silences.push([open, total]);
+  silences.sort((a, b) => a[0] - b[0]);
+
+  // Speech is everything the silence detector did not claim.
+  const runs = [];
+  let cursor = 0;
+  for (const [start, end] of silences) {
+    if (start - cursor > 1.2) runs.push([cursor, Math.min(start, total)]);
+    cursor = Math.max(cursor, end);
+  }
+  if (total - cursor > 1.2) runs.push([cursor, total]);
+  if (!runs.length && total > 1) runs.push([0, total]);
+
+  // Split runs that exceed the platform maximum into evenly sized windows.
+  const windows = [];
+  for (const [start, end] of runs) {
+    const length = end - start;
+    if (length < minSec) continue;
+    if (length <= maxSec) {
+      windows.push([start, end]);
+      continue;
+    }
+    const pieces = Math.ceil(length / maxSec);
+    const size = length / pieces;
+    for (let i = 0; i < pieces; i += 1) {
+      const from = start + i * size;
+      windows.push([from, Math.min(from + size, end)]);
+    }
+  }
+
+  return windows
+    .map(([start, end], index) => {
+      const length = Math.round((end - start) * 10) / 10;
+      // Longer uninterrupted speech tends to hold a complete thought; treat that
+      // as the only signal available without an AI provider.
+      const completeness = Math.min(1, length / Math.min(maxSec, 45));
+      const score = Math.round((0.45 + completeness * 0.4) * 100) / 100;
+      return {
+        index,
+        start: Math.round(start * 10) / 10,
+        end: Math.round(end * 10) / 10,
+        duration: length,
+        score: Math.min(score, 0.92),
+        title: `Speech segment ${index + 1} (${length}s)`,
+        reason: 'Longest continuous speech run detected in the audio.',
+        metrics: { speech: 1, completeness: Math.round(completeness * 100) / 100 },
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, count)
+    .sort((a, b) => a.start - b.start)
+    .map((moment, index) => ({ ...moment, index }));
+}
+
 export async function renderClip({
   input,
   output,
