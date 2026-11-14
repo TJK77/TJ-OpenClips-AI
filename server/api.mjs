@@ -725,9 +725,16 @@ router.post('/api/jobs', async (req, res, ctx) => {
   const aspect = ASPECT_KEYS.includes(body.aspect) ? body.aspect : '9:16';
   const analysisProvider = PROVIDERS.includes(body.analysisProvider) ? body.analysisProvider : 'openrouter';
 
+  // Explicit opt-in for the key-free path (ffmpeg speech-boundary detection).
+  // Without this flag the AI gate below still applies, so a job never silently
+  // downgrades from AI analysis to a local heuristic — the user always chooses.
+  const localMode = body.local === true || body.analysisMode === 'local';
+
   const missing = [];
-  if (!providerKey(ctx.user.id, 'groq')) missing.push('Groq (transcription)');
-  if (!providerKey(ctx.user.id, analysisProvider)) missing.push(`${analysisProvider} (analysis)`);
+  if (!localMode) {
+    if (!providerKey(ctx.user.id, 'groq')) missing.push('Groq (transcription)');
+    if (!providerKey(ctx.user.id, analysisProvider)) missing.push(`${analysisProvider} (analysis)`);
+  }
   if (missing.length) {
     return fail(res, 400, `Configure ${missing.join(' and ')} in AI Models before analysing a video.`, {
       missingProviders: missing,
@@ -744,6 +751,7 @@ router.post('/api/jobs', async (req, res, ctx) => {
     stages: STAGES.map((s) => ({ ...s, status: 'pending' })),
     aspect,
     analysisProvider,
+    analysisMode: localMode ? 'local' : 'ai',
     model: String(body.model || '').slice(0, 120),
     transcriptionModel: String(body.transcriptionModel || 'whisper-large-v3-turbo').slice(0, 120),
     language: String(body.language || video.language || 'auto').slice(0, 40),
