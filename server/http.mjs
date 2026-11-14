@@ -36,26 +36,42 @@ export function createRouter() {
   };
 }
 
+/**
+ * Applied to every response, API and static. The policy is written around what
+ * the shipped SPA actually needs:
+ * - same-origin scripts only (Vite emits external bundles, no inline scripts)
+ * - 'unsafe-inline' styles because React style props render style attributes
+ * - Google Fonts (index.css imports them and index.html preconnects)
+ * - blob:/data: media for local video previews and MP4 downloads
+ * - https images for remote video thumbnails
+ * - same-origin fetch for the API (provider keys never leave the server)
+ * OAuth sign-in is a top-level navigation, so frame/form directives do not
+ * interfere with Google or Buffer.
+ */
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' blob: data: https:",
+  "connect-src 'self'",
+  "worker-src 'self' blob:",
+  "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "manifest-src 'self'",
+].join('; ');
+
 export function applySecurityHeaders(res) {
+  res.setHeader('content-security-policy', CONTENT_SECURITY_POLICY);
   res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('x-frame-options', 'DENY');
   res.setHeader('referrer-policy', 'strict-origin-when-cross-origin');
-  res.setHeader('x-frame-options', 'SAMEORIGIN');
   res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=()');
-  res.setHeader(
-    'content-security-policy',
-    [
-      "default-src 'self'",
-      "img-src 'self' data: blob:",
-      "media-src 'self' blob: data:",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline'",
-      "font-src 'self' data:",
-      "connect-src 'self'",
-      "frame-ancestors 'self'",
-      "base-uri 'self'",
-      "form-action 'self'",
-    ].join('; ')
-  );
+  res.setHeader('cross-origin-opener-policy', 'same-origin');
 }
 
 export function json(res, status, payload) {

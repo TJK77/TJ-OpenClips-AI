@@ -4,10 +4,10 @@ import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { router } from './server/api.mjs';
 import { currentUser } from './server/api.mjs';
-import { fail, clientIp } from './server/http.mjs';
-import { rateLimit } from './server/security.mjs';
-import { dirs } from './server/config.mjs';
-import { initPersistence, saveNow, storeMode } from './server/store.mjs';
+import { fail, clientIp, applySecurityHeaders } from './server/http.mjs';
+import { rateLimit } from './server/ratelimit.mjs';
+import { dirs, initSecrets } from './server/config.mjs';
+import { initPersistence, saveNow, storeMode, count } from './server/store.mjs';
 
 const root = fileURLToPath(new URL('./dist/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -31,14 +31,6 @@ const types = {
   '.mp4': 'video/mp4',
 };
 
-const SECURITY_HEADERS = {
-  'x-content-type-options': 'nosniff',
-  'referrer-policy': 'strict-origin-when-cross-origin',
-  'x-frame-options': 'SAMEORIGIN',
-  'cross-origin-opener-policy': 'same-origin',
-  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
-};
-
 async function serveStatic(req, res, pathname) {
   const decoded = decodeURIComponent(pathname);
   const relative = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
@@ -60,7 +52,6 @@ async function serveStatic(req, res, pathname) {
     const ext = extname(filePath).toLowerCase();
     const isHtml = ext === '.html';
     res.writeHead(200, {
-      ...SECURITY_HEADERS,
       'content-type': types[ext] || 'application/octet-stream',
       'cache-control': isHtml ? 'no-cache' : 'public, max-age=31536000, immutable',
       'content-length': body.length,
@@ -77,11 +68,12 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
 
+  // One place applies the hardening headers so no response can be served without them.
+  applySecurityHeaders(res);
+
   if (pathname.startsWith('/api/')) {
-    res.setHeader('x-content-type-options', 'nosniff');
-    res.setHeader('referrer-policy', 'strict-origin-when-cross-origin');
     res.setHeader('cache-control', 'no-store');
-    if (!rateLimit(`api:${clientIp(req)}`, 600, 60 * 1000)) {
+    if (!(await rateLimit(`api:${clientIp(req)}`, 600, 60 * 1000))) {
       return fail(res, 429, 'Too many requests. Slow down for a moment.');
     }
     try {
@@ -117,10 +109,19 @@ server.keepAliveTimeout = 61_000;
 
 await initPersistence();
 
+/**
+ * Secrets resolve after the store is loaded so a missing credential key can be
+ * detected before anything generates a replacement and orphans stored secrets.
+ */
+const secrets = initSecrets({
+  encryptedCredentials: count('credentials', (record) => Boolean(record.encryptedKey)),
+});
+
 server.listen(port, '0.0.0.0', () => {
   console.log(`TJ OpenClips AI Studio listening on 0.0.0.0:${port}`);
   console.log(`Data directory: ${dirs.data}`);
   console.log(`Persistence: ${storeMode()}`);
+  console.log(`Secrets: session=${secrets.session} credentials=${secrets.credentials}`);
 });
 
 const shutdown = () => {

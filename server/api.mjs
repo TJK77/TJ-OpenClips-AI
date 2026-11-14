@@ -23,10 +23,11 @@ import {
   maskKey,
   sha256,
   newToken,
-  rateLimit,
+  needsRehash,
   EMAIL_RE,
   passwordProblem,
 } from './security.mjs';
+import { rateLimit } from './ratelimit.mjs';
 import {
   groqTest,
   openrouterTest,
@@ -335,7 +336,7 @@ export const router = createRouter();
 /* --- auth --- */
 
 router.post('/api/auth/register', async (req, res, ctx) => {
-  if (!rateLimit(`register:${clientIp(req)}`, 10, 60 * 60 * 1000)) {
+  if (!(await rateLimit(`register:${clientIp(req)}`, 10, 60 * 60 * 1000))) {
     return fail(res, 429, 'Too many registration attempts. Try again later.');
   }
   const body = await readJson(req);
@@ -369,12 +370,21 @@ router.post('/api/auth/login', async (req, res) => {
   const body = await readJson(req);
   const email = String(body.email || '').trim().toLowerCase();
   const password = String(body.password || '');
-  if (!rateLimit(`login:${clientIp(req)}:${email}`, 12, 15 * 60 * 1000)) {
+  if (!(await rateLimit(`login:${clientIp(req)}:${email}`, 12, 15 * 60 * 1000))) {
     return fail(res, 429, 'Too many sign-in attempts. Wait a few minutes and try again.');
   }
   const user = store.where('users', (u) => u.email === email)[0];
   if (!user || !verifyPassword(password, user.passwordHash)) {
     return fail(res, 401, 'Email or password is incorrect.');
+  }
+  if (needsRehash(user.passwordHash)) {
+    // The plaintext is only available here, right after a successful check, so
+    // this is the one place an older hash can be upgraded transparently.
+    try {
+      store.update('users', user.id, { passwordHash: hashPassword(password) });
+    } catch (error) {
+      console.error('[auth] password hash upgrade failed:', error.message);
+    }
   }
   createSession(res, req, user.id);
   return json(res, 200, { user: userView(user) });
@@ -631,7 +641,7 @@ function videoTranscriptText(userId, videoId) {
 
 router.post('/api/ai/caption', async (req, res, ctx) => {
   if (!requireUser(ctx, res)) return;
-  if (!rateLimit(`caption:${ctx.user.id}`, 60, 10 * 60 * 1000)) {
+  if (!(await rateLimit(`caption:${ctx.user.id}`, 60, 10 * 60 * 1000))) {
     return fail(res, 429, 'Too many description requests. Try again in a few minutes.');
   }
   const body = await readJson(req);
@@ -795,7 +805,13 @@ router.post('/api/providers/:provider/test', async (req, res, ctx) => {
   }
 });
 
-router.get('/api/providers/openrouter/free-models', async (req, res) => {
+router.get('/api/providers/openrouter/free-models', async (req, res, ctx) => {
+  // Signed-in only: this endpoint proxies a third-party catalogue, so an open
+  // route would let anyone use the server as an unauthenticated proxy.
+  if (!requireUser(ctx, res)) return;
+  if (!(await rateLimit(`freemodels:${ctx.user.id}`, 20, 60 * 60 * 1000))) {
+    return fail(res, 429, 'Free model lookup limit reached for this hour. Try again later.');
+  }
   try {
     return json(res, 200, { models: await openrouterFreeModels() });
   } catch (error) {
@@ -807,7 +823,7 @@ router.get('/api/providers/openrouter/free-models', async (req, res) => {
 
 router.post('/api/videos/upload', async (req, res, ctx) => {
   if (!requireUser(ctx, res)) return;
-  if (!rateLimit(`upload:${ctx.user.id}`, 20, 60 * 60 * 1000)) {
+  if (!(await rateLimit(`upload:${ctx.user.id}`, 20, 60 * 60 * 1000))) {
     return fail(res, 429, 'Upload limit reached for this hour. Try again shortly.');
   }
   const filename = safeName(req.headers['x-filename'] || 'upload.mp4');
@@ -865,7 +881,7 @@ router.post('/api/videos/upload', async (req, res, ctx) => {
 
 router.post('/api/videos/inspect', async (req, res, ctx) => {
   if (!requireUser(ctx, res)) return;
-  if (!rateLimit(`inspect:${ctx.user.id}`, 40, 10 * 60 * 1000)) {
+  if (!(await rateLimit(`inspect:${ctx.user.id}`, 40, 10 * 60 * 1000))) {
     return fail(res, 429, 'Too many link checks. Wait a few minutes and try again.');
   }
   const body = await readJson(req);
