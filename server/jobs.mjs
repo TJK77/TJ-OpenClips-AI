@@ -12,6 +12,7 @@ import {
   engagementScore,
   aspectDims,
   ffmpegAvailable,
+  detectSpeechMoments,
 } from './video.mjs';
 import { groqTranscribe, analyseTranscript, ProviderError } from './providers.mjs';
 import { decryptSecret } from './security.mjs';
@@ -197,61 +198,90 @@ export async function runJob(jobId) {
     current = 'transcribe';
     update(job, { stages: stageState(job, 'transcribe', 'running'), stage: 'transcribe', progress: 18 });
     const groqKey = providerKey(job.userId, 'groq');
-    if (!groqKey) {
-      throw Object.assign(new Error('Groq is not configured. Add a Groq API key in AI Models so audio can be transcribed.'), {
-        hint: 'Open AI Models, paste your Groq key and press Test connection first.',
-      });
-    }
-    let transcript = null;
-    if (job.transcript && job.transcript.segments?.length) {
-      transcript = job.transcript;
-    } else {
-      transcript = await groqTranscribe(groqKey, {
-        audioPath,
-        filename: `${video.id}.mp3`,
-        model: job.transcriptionModel || 'whisper-large-v3-turbo',
-        language: job.language || 'auto',
-      });
-    }
-    update(job, {
-      transcript,
-      stages: stageState(
-        job,
-        'transcribe',
-        'done',
-        `${transcript.segments.length} segments · ${transcript.language}${transcript.wordTimings ? ' · word timings' : ''}`
-      ),
-      progress: 34,
-    });
+    const analysisKey = providerKey(job.userId, job.analysisProvider);
+    // Missing credentials are not a crash: the local detector still produces real
+    // rendered MP4s. It never claims to have transcribed speech it did not read.
+    const localMode = !groqKey || !analysisKey;
+    let transcript = { segments: [], words: [], language: 'none', text: '', wordTimings: false };
+    let analysis = null;
 
-    /* 4 — AI analysis */
+    if (localMode) {
+      update(job, {
+        analysisMode: 'local',
+        stages: stageState(job, 'transcribe', 'done', 'Skipped — no Groq key, using local speech detection'),
+        progress: 34,
+      });
+    } else {
+      if (job.transcript && job.transcript.segments?.length) {
+        transcript = job.transcript;
+      } else {
+        transcript = await groqTranscribe(groqKey, {
+          audioPath,
+          filename: `${video.id}.mp3`,
+          model: job.transcriptionModel || 'whisper-large-v3-turbo',
+          language: job.language || 'auto',
+        });
+      }
+      update(job, {
+        transcript,
+        analysisMode: 'ai',
+        stages: stageState(
+          job,
+          'transcribe',
+          'done',
+          `${transcript.segments.length} segments · ${transcript.language}${transcript.wordTimings ? ' · word timings' : ''}`
+        ),
+        progress: 34,
+      });
+    }
+
+    /* 4 — AI analysis (or local speech-boundary detection) */
     current = 'analyse';
     update(job, { stages: stageState(job, 'analyse', 'running'), stage: 'analyse', progress: 36 });
-    const analysisKey = providerKey(job.userId, job.analysisProvider);
-    if (!analysisKey) {
-      throw Object.assign(
-        new Error(`${job.analysisProvider} is not configured. Add an API key in AI Models to analyse the transcript.`),
-        { hint: 'Open AI Models, save a key for this provider and test the connection.' }
-      );
-    }
-    const analysis = await analyseTranscript({
-      provider: job.analysisProvider,
-      apiKey: analysisKey,
-      model: job.model,
-      transcript,
-      options: {
-        targetClips: job.targetClips || config.clipLimitPerJob,
-        minSec: job.minSec || 15,
+    if (localMode) {
+      const moments = await detectSpeechMoments(audioPath, {
+        duration: meta.duration,
+        minSec: Math.max(8, job.minSec || 15),
         maxSec: job.maxSec || 60,
-        style: job.captionStyle?.name,
-      },
-    });
-    update(job, {
-      stages: stageState(job, 'analyse', 'done', `${analysis.moments.length} candidate moments · ${analysis.model}`),
-      progress: 50,
-      analysisSummary: analysis.summary,
-      topics: analysis.topics,
-    });
+        count: job.targetClips || config.clipLimitPerJob,
+      });
+      if (!moments.length) {
+        throw Object.assign(new Error('No speech segments were detected in this audio track.'), {
+          hint: 'Add a Groq key in AI Models for transcript-based analysis, or try a video with audible speech.',
+        });
+      }
+      analysis = {
+        moments,
+        summary: 'Local speech-boundary detection (no AI provider configured).',
+        topics: [],
+        model: 'ffmpeg silencedetect',
+      };
+      update(job, {
+        stages: stageState(job, 'analyse', 'done', `${moments.length} speech segments · local detector`),
+        progress: 50,
+        analysisSummary: analysis.summary,
+        topics: [],
+      });
+    } else {
+      analysis = await analyseTranscript({
+        provider: job.analysisProvider,
+        apiKey: analysisKey,
+        model: job.model,
+        transcript,
+        options: {
+          targetClips: job.targetClips || config.clipLimitPerJob,
+          minSec: job.minSec || 15,
+          maxSec: job.maxSec || 60,
+          style: job.captionStyle?.name,
+        },
+      });
+      update(job, {
+        stages: stageState(job, 'analyse', 'done', `${analysis.moments.length} candidate moments · ${analysis.model}`),
+        progress: 50,
+        analysisSummary: analysis.summary,
+        topics: analysis.topics,
+      });
+    }
 
     /* 5 — moment detection (validate against the real timeline) */
     current = 'detect';
@@ -297,13 +327,20 @@ export async function runJob(jobId) {
     for (let index = 0; index < ranked.length; index += 1) {
       const moment = ranked[index];
       const clipId = store.newId('clip');
-      const srtPath = join(dirs.subs, `${clipId}.srt`);
-      const srt = buildSrt(transcript.segments, {
-        start: moment.start,
-        end: moment.end,
-        words: transcript.words || [],
-      });
-      await writeSrt(srtPath, srt);
+      // Only burn subtitles when real word timings exist; an empty subtitle file
+      // would make ffmpeg fail instead of exporting a clean clip.
+      let srtPath = null;
+      if (transcript.segments.length) {
+        const srt = buildSrt(transcript.segments, {
+          start: moment.start,
+          end: moment.end,
+          words: transcript.words || [],
+        });
+        if (srt.trim()) {
+          srtPath = join(dirs.subs, `${clipId}.srt`);
+          await writeSrt(srtPath, srt);
+        }
+      }
 
       const output = join(dirs.clips, `${clipId}.mp4`);
       const result = await renderClip({
