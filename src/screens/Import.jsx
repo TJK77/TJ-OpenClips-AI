@@ -69,7 +69,7 @@ export default function ImportVideo() {
 
   const ready = mode === 'link' ? /^https?:\/\/.+\..+/.test(url.trim()) : !!file && !uploading;
 
-  const analyze = async () => {
+  const analyze = async (localMode = false) => {
     if (!ready || busy) {
       toast(mode === 'link' ? 'Add a video link before analysing.' : 'Choose a video file before analysing.', 'error');
       return;
@@ -92,8 +92,13 @@ export default function ImportVideo() {
         videoId = result.video.id;
       }
       const wanted = Number((String(targetClips).match(/\d+/) || [8])[0]) || 8;
-      await startAnalysis({ videoId, aspect: '9:16', clipCount: wanted });
-      toast('Video queued — the server is running the real pipeline.', 'info');
+      await startAnalysis({ videoId, aspect: '9:16', targetClips: wanted, local: localMode });
+      toast(
+        localMode
+          ? 'Queued — rendering with local speech detection. No AI key is used.'
+          : 'Video queued — the server is running the real pipeline.',
+        'info'
+      );
       navigate('/analyze');
     } catch (error) {
       toast(error.message, 'error');
@@ -241,13 +246,18 @@ export default function ImportVideo() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button className="btn btn-primary btn-lg w-full sm:w-auto" onClick={analyze}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
+            <button className="btn btn-primary btn-lg w-full sm:w-auto" onClick={() => analyze()} disabled={busy}>
               <Icon name="wand" size={17} /> Analyze video
               <Icon name="arrow-right" size={16} />
             </button>
-            <p className="text-[11px] leading-relaxed text-muted sm:max-w-xs">
-              Uses your configured AI provider key. Transcription + analysis usually takes 2–4 minutes for a 40-minute video.
+            <button className="btn btn-secondary btn-lg w-full sm:w-auto" onClick={() => analyze(true)} disabled={busy}>
+              <Icon name="video" size={17} /> Render without AI
+            </button>
+            <p className="text-[11px] leading-relaxed text-muted sm:max-w-sm">
+              <strong className="text-white/70">Analyze video</strong> uses your configured AI provider key for transcription and
+              moment selection. <strong className="text-white/70">Render without AI</strong> skips transcription and cuts clips at
+              detected speech boundaries — real rendered MP4s, no key required.
             </p>
           </div>
         </div>
