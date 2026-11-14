@@ -145,8 +145,7 @@ export function setCookie(res, name, value, options = {}) {
   const parts = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
   if (options.maxAge !== undefined) parts.push(`Max-Age=${options.maxAge}`);
   if (options.secure) parts.push('Secure');
-  res.appendHeader?.('set-cookie', parts.join('; ')) ??
-    appendHeader(res, parts.join('; '));
+  appendHeader(res, parts.join('; '));
 }
 
 function appendHeader(res, cookie) {
