@@ -38,6 +38,7 @@ import {
   GROQ_MODELS,
 } from './providers.mjs';
 import { probe, renderClip, buildSrt, writeSrt, makeThumbnail, aspectDims, ASPECT_KEYS, ffmpegAvailable, ffmpegCapabilities } from './video.mjs';
+import { inspectVideoUrl } from './youtube.mjs';
 import { enqueue, providerKey, STAGES, DEFAULT_CAPTION_STYLE, queueSize } from './jobs.mjs';
 import {
   authorizationLink,
@@ -602,6 +603,21 @@ router.post('/api/videos/upload', async (req, res, ctx) => {
     status: 'imported',
   });
   return json(res, 201, { video: videoView(video) });
+});
+
+router.post('/api/videos/inspect', async (req, res, ctx) => {
+  if (!requireUser(ctx, res)) return;
+  if (!rateLimit(`inspect:${ctx.user.id}`, 40, 10 * 60 * 1000)) {
+    return fail(res, 429, 'Too many link checks. Wait a few minutes and try again.');
+  }
+  const body = await readJson(req);
+  const url = String(body.url || '').trim();
+  if (!url) return fail(res, 400, 'Paste a video link first.');
+  const result = await inspectVideoUrl(url);
+  if (!result.ok) {
+    return fail(res, 400, result.error || 'That link could not be inspected.', { inspect: result });
+  }
+  return json(res, 200, { inspect: result });
 });
 
 router.post('/api/videos/import', async (req, res, ctx) => {
