@@ -93,7 +93,8 @@ export const api = {
       xhr.send(file);
     }),
 
-  importUrl: (payload) => request('/api/videos/import-url', { method: 'POST', body: payload }),
+  inspectUrl: (payload) => request('/api/videos/inspect', { method: 'POST', body: payload }),
+  importUrl: (payload) => request('/api/videos/import', { method: 'POST', body: payload }),
   videos: () => request('/api/videos'),
   deleteVideo: (id) => request(`/api/videos/${id}`, { method: 'DELETE' }),
 

@@ -536,6 +536,7 @@ export function StoreProvider({ children }) {
         await refresh({ silent: true });
         return result;
       },
+      inspectVideoUrl: async (payload) => api.inspectUrl(payload),
       importVideoUrl: async (payload) => {
         const result = await api.importUrl(payload);
         await refresh({ silent: true });
