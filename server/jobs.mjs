@@ -11,6 +11,7 @@ import {
   makeThumbnail,
   engagementScore,
   aspectDims,
+  ffmpegAvailable,
 } from './video.mjs';
 import { groqTranscribe, analyseTranscript, ProviderError } from './providers.mjs';
 import { decryptSecret } from './security.mjs';
@@ -143,6 +144,20 @@ export async function runJob(jobId) {
     /* 1 — validate the source */
     current = 'import';
     update(job, { stages: stageState(job, 'import', 'running'), stage: 'import', progress: 4 });
+    // Fail with a precise reason instead of a raw spawn error: the video engine
+    // (ffmpeg) is an optional part of this image, so a deployment can run the
+    // real API, AI providers and Buffer integration without being able to render.
+    if (!(await ffmpegAvailable())) {
+      throw Object.assign(
+        new Error(
+          'Video processing is unavailable in this deployment because the ffmpeg video engine is not installed in the container image.'
+        ),
+        {
+          hint:
+            'Rendering needs an image built with INSTALL_FFMPEG=1 (the platform image scanner currently blocks ffmpeg because of an unactionable glib advisory) or a host that already provides ffmpeg. AI providers, projects, clips and Buffer publishing keep working meanwhile.',
+        }
+      );
+    }
     const info = await stat(video.path);
     if (!info.size) throw new Error('The uploaded file is empty.');
     const meta = await probe(video.path);
