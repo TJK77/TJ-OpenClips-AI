@@ -290,8 +290,7 @@ export default function Composer() {
               <div className="mt-3 space-y-2">
                 <button
                   className="btn btn-primary w-full"
-                  onClick={() => {
-                    onClick={async () => {
+                  onClick={async () => {
                     const res = await buildPost('scheduled');
                     if (!res) return;
                     toast('Post scheduled and saved to your queue.', 'success');

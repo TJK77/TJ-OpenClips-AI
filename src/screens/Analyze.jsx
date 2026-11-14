@@ -93,19 +93,26 @@ export default function Analyze() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 border-t border-white/8 p-3">
-              <button className="btn btn-primary btn-sm" onClick={() => setRunning((r) => !r)} disabled={done}>
-                <Icon name={running && !done ? 'pause' : 'play'} size={13} /> {done ? 'Finished' : running ? 'Pause' : 'Resume'}
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={() => { setAnalysisStage(9); setRunning(false); }} disabled={done}>
-                <Icon name="refresh" size={13} /> Skip to end
-              </button>
               <button className="btn btn-ghost btn-sm" onClick={restart}>
-                <Icon name="refresh" size={13} /> Re-run
+                <Icon name="refresh" size={13} /> Re-run pipeline
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => navigate('/clips')} disabled={!done}>
+                <Icon name="layers" size={13} /> View clips
               </button>
               <span className="ml-auto flex items-center gap-1.5 text-[10px] text-white/40">
-                <Icon name="clock" size={11} /> {done ? 'Finished in 2m 14s' : `~${Math.max(1, 9 - stage) * 14}s remaining`}
+                <Icon name="clock" size={11} />
+                {failed
+                  ? 'Pipeline stopped — see the error below'
+                  : done
+                    ? `Finished · ${clips.filter((c) => c.jobId === analysis.jobId).length} clips generated`
+                    : `Stage ${Math.max(1, stage)} of 9 · ${analysis.status || 'running'}`}
               </span>
             </div>
+            {failed && (
+              <div className="border-t border-rose-400/30 bg-rose-500/10 p-3 text-[11px] leading-relaxed text-rose-200">
+                {analysis.error || 'The processing pipeline stopped.'} — fix the cause (usually the AI key or the source video), then press Re-run pipeline.
+              </div>
+            )}
           </section>
 
           {/* Live transcript */}

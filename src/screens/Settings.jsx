@@ -27,13 +27,15 @@ function Row({ title, body, children }) {
 }
 
 export default function Settings() {
-  const { user, settings, patch, providers, buffer, clips, posts, projects, toast, navigate, signOut, resetDemo } = useStore();
+  const { user, settings, saveSettings, updateProfile, providers, buffer, clips, posts, projects, toast, navigate, signOut, resetDemo } = useStore();
   const [tab, setTab] = useState('profile');
   const [confirmReset, setConfirmReset] = useState(false);
   const [profile, setProfile] = useState({ name: user.name, email: user.email, workspace: 'TJ OpenClips Studio', timezone: 'America/New_York' });
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
 
-  const set = (key, value) => patch({ settings: { ...settings, [key]: value } });
+  const set = (key, value) => {
+    saveSettings({ [key]: value }).catch((error) => toast(error.message, 'error'));
+  };
   const connectedProviders = useMemo(() => providers.filter((p) => p.connected), [providers]);
   const usageMb = useMemo(() => clips.length * 18.4 + projects.length * 96, [clips, projects]);
 
@@ -89,7 +91,17 @@ export default function Settings() {
           </div>
           <div className="flex justify-end gap-2 p-3">
             <button className="btn btn-ghost btn-sm" onClick={() => setProfile({ name: user.name, email: user.email, workspace: 'TJ OpenClips Studio', timezone: 'America/New_York' })}>Cancel</button>
-            <button className="btn btn-primary btn-sm" onClick={() => { patch({ user: { ...user, name: profile.name, email: profile.email, initials: profile.name.split(' ').map((n) => n[0]).slice(0, 2).join('') } }); toast('Profile updated.', 'success'); }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={async () => {
+                try {
+                  await updateProfile({ name: profile.name.trim(), email: profile.email.trim() });
+                  toast('Profile saved to your account.', 'success');
+                } catch (error) {
+                  toast(error.message, 'error');
+                }
+              }}
+            >
               Save changes
             </button>
           </div>
@@ -259,16 +271,31 @@ export default function Settings() {
       <Modal
         open={confirmReset}
         onClose={() => setConfirmReset(false)}
-        title="Reset demo data?"
-        subtitle="Your local changes will be replaced with the seeded workspace."
+        title="Delete workspace data?"
+        subtitle="Your uploads, clips, provider keys, Buffer connection and posts will be removed from the server."
         footer={
           <>
             <button className="btn btn-ghost btn-sm" onClick={() => setConfirmReset(false)}>Cancel</button>
-            <button className="btn btn-danger btn-sm" onClick={() => { resetDemo(); setConfirmReset(false); toast('Demo workspace restored.', 'success'); navigate('/dashboard'); }}>Reset everything</button>
+            <button
+              className="btn btn-danger btn-sm"
+              onClick={async () => {
+                try {
+                  await resetDemo();
+                  toast('Workspace data deleted from the server.', 'success');
+                  navigate('/dashboard');
+                } catch (error) {
+                  toast(error.message, 'error');
+                } finally {
+                  setConfirmReset(false);
+                }
+              }}
+            >
+              Delete data
+            </button>
           </>
         }
       >
-        <p className="text-[12px] leading-relaxed text-white/60">This clears saved caption styles, provider keys, Buffer connection and scheduled posts in this browser.</p>
+        <p className="text-[12px] leading-relaxed text-white/60">This permanently clears your videos, rendered clips, transcript records, saved API keys and Buffer connection on the server. Your account stays active.</p>
       </Modal>
     </div>
   );
