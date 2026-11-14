@@ -11,7 +11,7 @@ const TABS = [
   { id: 'storage', label: 'Storage', icon: 'database' },
   { id: 'processing', label: 'Processing', icon: 'sliders' },
   { id: 'notifications', label: 'Notifications', icon: 'bell' },
-  { id: 'data', label: 'Data', icon: 'shield' },
+  { id: 'data', label: 'Data management', icon: 'shield' },
 ];
 
 function Row({ title, body, children }) {

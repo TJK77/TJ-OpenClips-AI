@@ -297,7 +297,7 @@ export default function Composer() {
                       navigate('/queue');
                     }}
                   >
-                    <Icon name="layers" size={13} /> Add to queue
+                    <Icon name="layers" size={13} /> Add to Buffer Queue
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
