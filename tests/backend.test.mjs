@@ -312,6 +312,66 @@ test('api: analytics and account purge work on real data', async () => {
   assert.equal(state.body.videos.length, 0, 'purge removed uploaded video records');
 });
 
+test('api: settings persist for the signed-in user', async () => {
+  const patch = await api('/api/settings', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ quality: 'high', autoCaptions: false, language: 'en', bogusKey: 'ignored' }),
+  });
+  assert.equal(patch.status, 200);
+  assert.equal(patch.body.settings.quality, 'high');
+  assert.equal(patch.body.settings.autoCaptions, false);
+  assert.equal('bogusKey' in patch.body.settings, false, 'unknown keys are ignored');
+
+  const state = await api('/api/state');
+  assert.equal(state.body.settings.quality, 'high', 'state exposes the saved settings');
+  assert.equal(state.body.settings.autoCaptions, false);
+});
+
+test('api: AI description falls back to the real transcript without inventing content', async () => {
+  const transcript =
+    'Most creators never publish their first video because they edit too early. ' +
+    'Batch filming three episodes in one afternoon removes that friction.';
+  const res = await api('/api/ai/caption', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: transcript, platform: 'tiktok' }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.aiGenerated, false, 'no key configured, so nothing is labelled AI');
+  assert.equal(res.body.source, 'local-extractive');
+  assert.ok(res.body.caption.length > 0, 'composer receives a top-level caption');
+  assert.ok(res.body.hashtags.length > 0, 'composer receives top-level hashtags');
+  assert.match(res.body.note, /no AI provider key/i, 'the response says plainly that no AI ran');
+  const haystack = transcript.toLowerCase();
+  for (const tag of res.body.hashtags) {
+    assert.ok(haystack.includes(tag.slice(1)), `hashtag ${tag} must come from the transcript`);
+  }
+});
+
+test('api: description requests are authorised and validated', async () => {
+  const missing = await api('/api/ai/caption', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(missing.status, 400, 'empty request rejected');
+
+  const foreign = await api('/api/ai/caption', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ clipId: 'clip_not_owned' }),
+  });
+  assert.equal(foreign.status, 404, 'clips owned by nobody are refused');
+
+  const anonymous = await fetch(`${BASE}/api/ai/caption`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(anonymous.status, 401, 'no session means no generation');
+});
+
 test('api: logout invalidates the session', async () => {
   const out = await api('/api/auth/logout', { method: 'POST' });
   assert.equal(out.status, 200);
