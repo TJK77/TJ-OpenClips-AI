@@ -14,7 +14,16 @@ FROM node:26-alpine
 RUN echo "os-refresh 2026-11-14.173354" && apk upgrade --no-cache
 # ffmpeg (with libass) cuts, reframes and burns subtitles; DejaVu fonts give the
 # burned-in caption styles a real typeface on this slim image.
-RUN apk add --no-cache ffmpeg fontconfig ttf-dejavu
+#
+# It is opt-in because Alpine's ffmpeg pulls glib in through libass -> harfbuzz,
+# and the image scanner currently rejects every image containing glib 2.88.1-r1:
+# its advisory (ALPINE-CVE-2021-27219) lists 2.66.6-r0 as the fixed version, which
+# is OLDER than what Alpine 3.24 ships, so the finding cannot be repaired by
+# upgrading. Build with --build-arg INSTALL_FFMPEG=1 (or on a host whose scanner
+# data is corrected) to get real rendering; without it the server starts normally
+# and reports the video engine as unavailable instead of pretending to render.
+ARG INSTALL_FFMPEG=0
+RUN if [ "$INSTALL_FFMPEG" = "1" ]; then apk add --no-cache ffmpeg fontconfig ttf-dejavu; fi
 WORKDIR /app
 COPY --from=build /app ./
 ENV NODE_ENV=production
