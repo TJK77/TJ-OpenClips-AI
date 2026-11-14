@@ -48,9 +48,14 @@ export default function Composer() {
     setGenerating(true);
     try {
       const result = await generateCaptionAI({ clipId: activeClip.id });
-      if (result.caption) setText(result.caption);
+      const copy = result.caption || result.description?.description || '';
+      if (copy) setText(copy);
       if (result.hashtags?.length) setHashtags(result.hashtags.join(' '));
-      toast(`Caption written by ${result.provider || 'your configured AI provider'}.`, 'success');
+      if (result.aiGenerated) {
+        toast(`Description written by ${result.provider}${result.model ? ` (${result.model})` : ''}.`, 'success');
+      } else {
+        toast(result.note || 'No AI key configured — description built locally from the real transcript.', 'info');
+      }
     } catch (error) {
       toast(error.message, 'error');
     } finally {

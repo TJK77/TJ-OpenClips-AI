@@ -499,6 +499,19 @@ const PLATFORM_RULES = {
   pinterest: 'Pinterest: descriptive and searchable.',
 };
 
+function describeForClient(desc, generator) {
+  return {
+    caption: String(desc.description || desc.hook || '').slice(0, 260),
+    hashtags: Array.isArray(desc.hashtags) ? desc.hashtags : [],
+    title: desc.title || '',
+    keywords: Array.isArray(desc.keywords) ? desc.keywords : [],
+    tags: Array.isArray(desc.tags) ? desc.tags : [],
+    hook: desc.hook || '',
+    cta: desc.cta || '',
+    generator,
+  };
+}
+
 function clipTranscriptText(userId, clipId) {
   const clip = store.get('clips', clipId);
   if (!clip || clip.userId !== userId) return null;
@@ -575,6 +588,7 @@ router.post('/api/ai/caption', async (req, res, ctx) => {
       });
       if (result.title || result.description) {
         return json(res, 200, {
+          ...describeForClient(result, 'ai'),
           description: result,
           source: 'ai',
           provider,
@@ -591,8 +605,10 @@ router.post('/api/ai/caption', async (req, res, ctx) => {
     }
   }
 
+  const local = localDescription({ text, platform });
   return json(res, 200, {
-    description: localDescription({ text, platform }),
+    ...describeForClient(local, 'local-extractive'),
+    description: local,
     source: 'local-extractive',
     provider: null,
     model: null,
