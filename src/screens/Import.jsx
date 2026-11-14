@@ -33,25 +33,21 @@ export default function ImportVideo() {
   const [captionStyle, setCaptionStyle] = useState('Bold Viral');
   const [fetching, setFetching] = useState(false);
   const inputRef = useRef(null);
+  const rawFile = useRef(null);
+  const [busy, setBusy] = useState(false);
   const timer = useRef(null);
 
   useEffect(() => () => clearInterval(timer.current), []);
 
   const startUpload = (f) => {
+    if (f.size > 512 * 1024 * 1024) {
+      toast('That file is larger than the 512 MB upload limit. Trim it first or paste a link.', 'error');
+      return;
+    }
+    rawFile.current = f;
     setFile({ name: f.name, size: f.size, type: f.type || 'video/mp4' });
-    setUploading(true);
-    setUploadPct(6);
-    clearInterval(timer.current);
-    timer.current = setInterval(() => {
-      setUploadPct((p) => {
-        if (p >= 100) {
-          clearInterval(timer.current);
-          setUploading(false);
-          return 100;
-        }
-        return Math.min(100, p + Math.round(7 + Math.random() * 11));
-      });
-    }, 320);
+    setUploadPct(0);
+    setUploading(false);
     if (!title || title.startsWith('How I built')) setTitle(f.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
   };
 
@@ -67,11 +63,8 @@ export default function ImportVideo() {
       toast('Enter a valid video URL, for example a YouTube or Drive link.', 'error');
       return;
     }
-    setFetching(true);
-    setTimeout(() => {
-      setFetching(false);
-      toast('Source verified · 42:18 · 1080p available', 'success');
-    }, 900);
+    setFetching(false);
+    toast('Link accepted — the server downloads and validates it when you analyse.', 'info');
   };
 
   const ready = mode === 'link' ? /^https?:\/\/.+\..+/.test(url.trim()) : !!file && !uploading;
