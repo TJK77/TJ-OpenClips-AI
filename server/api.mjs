@@ -188,6 +188,7 @@ const jobView = (job) => ({
   errorStage: job.errorStage || null,
   aspect: job.aspect,
   analysisProvider: job.analysisProvider,
+  analysisMode: job.analysisMode || 'ai',
   model: job.model,
   transcript: job.transcript ? { language: job.transcript.language, segments: job.transcript.segments, words: job.transcript.words || [], text: job.transcript.text } : null,
   analysisSummary: job.analysisSummary || null,
