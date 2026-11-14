@@ -42,7 +42,14 @@ export default function Clips() {
     caps: ['bold-viral', 'karaoke', 'tiktok', 'animated-pop', 'yellow-keyword'].includes(caption.styleId),
   };
 
-  const download = (clip) => toast(`“${clip.title}” prepared — 1080×1920 MP4, captions burned in.`, 'success');
+  const download = (clip) => {
+    if (!clip.rendered) {
+      toast('This clip is still rendering on the server — try again once it is ready.', 'info');
+      return;
+    }
+    window.open(clip.downloadUrl || `/api/clips/${clip.id}/file?download=1`, '_blank', 'noopener');
+    toast(`Downloading “${clip.title}” — ${clip.width || 1080}×${clip.height || 1920} MP4.`, 'success');
+  };
 
   return (
     <div className="space-y-4 pb-2">

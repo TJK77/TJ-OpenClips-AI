@@ -14,7 +14,7 @@ const RATIOS = [
 const TRACK_COLORS = { video: '#7C5CFF', captions: '#22D3EE', music: '#34D399', voice: '#F472B6' };
 
 export default function Editor() {
-  const { caption, clips, navigate, toast } = useStore();
+  const { caption, clips, navigate, toast, renderClip } = useStore();
   const clip = clips[0];
   const [tab, setTab] = useState('trim');
   const [ratio, setRatio] = useState('9:16');
@@ -59,7 +59,30 @@ export default function Editor() {
             <button className="btn btn-ghost btn-sm" onClick={() => toast('Project saved as draft.', 'success')}>
               <Icon name="cloud" size={13} /> Save
             </button>
-            <button className="btn btn-primary btn-sm" onClick={() => { toast('Export queued — 1080×1920, captions burned in.', 'success'); navigate('/buffer'); }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={async () => {
+                if (!clip) {
+                  toast('Generate clips first — there is nothing to render yet.', 'error');
+                  return;
+                }
+                try {
+                  const span = clip.durationSec || clip.duration || 0;
+                  await renderClip(clip.id, {
+                    aspect: ratio,
+                    caption: style,
+                    watermark: watermark ? watermarkText : null,
+                    corner,
+                    trimStart: clip.start + (trimStart / 100) * span,
+                    trimEnd: clip.start + (trimEnd / 100) * span,
+                  });
+                  toast(`Rendered ${ratio} MP4 with burned-in captions.`, 'success');
+                  navigate('/buffer');
+                } catch (error) {
+                  toast(error.message, 'error');
+                }
+              }}
+            >
               <Icon name="download" size={13} /> Export
             </button>
           </div>

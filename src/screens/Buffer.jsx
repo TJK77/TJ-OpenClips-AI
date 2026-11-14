@@ -22,15 +22,24 @@ export default function Buffer() {
   const connected = buffer.channels.filter((c) => c.connected);
   const queued = posts.filter((p) => p.status === 'scheduled').length;
 
-  const doConnect = () => {
+  const doConnect = async () => {
     if (token.trim().length < 8) {
       toast('Enter a Buffer access token with at least 8 characters.', 'error');
       return;
     }
-    connectBuffer(token.trim());
-    setToken('');
-    setShowConnect(false);
-    toast('Buffer connected. Channels synced.', 'success');
+    try {
+      const result = await connectBuffer(token.trim());
+      setToken('');
+      setShowConnect(false);
+      toast(
+        result?.channels?.length
+          ? `Buffer connected — ${result.channels.length} channel${result.channels.length === 1 ? '' : 's'} synced.`
+          : 'Buffer connected. That account has no channels attached yet.',
+        'success'
+      );
+    } catch (error) {
+      toast(error.message, 'error');
+    }
   };
 
   return (

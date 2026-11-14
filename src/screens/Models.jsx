@@ -11,7 +11,7 @@ function maskKey(key) {
 }
 
 export default function Models() {
-  const { providers, updateProvider, toast, navigate } = useStore();
+  const { providers, updateProvider, testProvider, toast, navigate } = useStore();
   const [drafts, setDrafts] = useState({});
   const [visible, setVisible] = useState({});
   const [testing, setTesting] = useState({});
@@ -19,28 +19,43 @@ export default function Models() {
 
   const setDraft = (id, value) => setDrafts((d) => ({ ...d, [id]: value }));
 
-  const save = (provider) => {
+  const save = async (provider) => {
     const key = drafts[provider.id];
     if (!key || key.trim().length < 12) {
       toast('Enter a valid API key (at least 12 characters).', 'error');
       return;
     }
-    updateProvider(provider.id, { keyMask: maskKey(key), connected: true });
-    setDraft(provider.id, '');
-    toast(`${provider.name} key saved in this browser only.`, 'success');
+    try {
+      await updateProvider(provider.id, { apiKey: key.trim(), model: provider.model });
+      setDraft(provider.id, '');
+      toast(`${provider.name} key encrypted and stored on the server.`, 'success');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
   };
 
-  const test = (provider) => {
+  const test = async (provider) => {
+    if (drafts[provider.id]) {
+      try {
+        await updateProvider(provider.id, { apiKey: drafts[provider.id].trim(), model: provider.model });
+        setDraft(provider.id, '');
+      } catch (error) {
+        toast(error.message, 'error');
+        return;
+      }
+    }
     setTesting((t) => ({ ...t, [provider.id]: true }));
-    setTimeout(() => {
-      setTesting((t) => ({ ...t, [provider.id]: false }));
-      const hasKey = !!provider.keyMask || !!drafts[provider.id];
-      updateProvider(provider.id, { connected: hasKey });
+    try {
+      const result = await testProvider(provider.id);
       toast(
-        hasKey ? `${provider.name} connection verified · 214 ms` : `${provider.name} needs a saved key before it can connect.`,
-        hasKey ? 'success' : 'error'
+        `${provider.name} responded successfully${result?.latencyMs ? ` in ${result.latencyMs} ms` : ''}.`,
+        'success'
       );
-    }, 1100);
+    } catch (error) {
+      toast(`${provider.name}: ${error.message}`, 'error');
+    } finally {
+      setTesting((t) => ({ ...t, [provider.id]: false }));
+    }
   };
 
   return (

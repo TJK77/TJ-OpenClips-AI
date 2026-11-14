@@ -17,7 +17,7 @@ const HASHTAG_SETS = [
 ];
 
 export default function Composer() {
-  const { clips, selectedClips, toggleClip, buffer, posts, addPost, navigate, toast, caption } = useStore();
+  const { clips, selectedClips, toggleClip, buffer, posts, addPost, sendPost, generateCaption: generateCaptionAI, navigate, toast, caption } = useStore();
   const connectedChannels = buffer.channels.filter((c) => c.connected);
   const chosen = clips.filter((c) => selectedClips.includes(c.id));
   const [channels, setChannels] = useState(connectedChannels.slice(0, 2).map((c) => c.id));
@@ -40,16 +40,25 @@ export default function Composer() {
     gradient: caption.styleId === 'gradient-pop',
   }), [caption]);
 
-  const generateCaption = () => {
+  const generateCaption = async () => {
+    if (!activeClip) {
+      toast('Select a clip first so the AI has a real transcript to work from.', 'error');
+      return;
+    }
     setGenerating(true);
-    setTimeout(() => {
-      setText(CAPTION_SEEDS[Math.floor(Math.random() * CAPTION_SEEDS.length)]);
+    try {
+      const result = await generateCaptionAI({ clipId: activeClip.id });
+      if (result.caption) setText(result.caption);
+      if (result.hashtags?.length) setHashtags(result.hashtags.join(' '));
+      toast(`Caption written by ${result.provider || 'your configured AI provider'}.`, 'success');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
       setGenerating(false);
-      toast('Caption generated from the clip transcript.', 'success');
-    }, 900);
+    }
   };
 
-  const buildPost = (status) => {
+  const buildPost = async (status) => {
     if (!activeClip) {
       toast('Select at least one clip first.', 'error');
       return null;
@@ -62,23 +71,26 @@ export default function Composer() {
       toast('Write or generate a caption before scheduling.', 'error');
       return null;
     }
-    const queueId = status === 'scheduled' ? `BQ-${Math.floor(1000 + Math.random() * 8999)}` : null;
-    const post = {
-      clipId: activeClip.id,
-      title: activeClip.title,
-      caption: `${text}${hashtags ? `\n\n${hashtags}` : ''}`,
-      description,
-      channels,
-      date,
-      time,
-      status,
-      hue: activeClip.hue ?? 262,
-      hue2: activeClip.hue2 ?? 190,
-      queueId,
-      firstComment,
-    };
-    addPost(post);
-    return { post, queueId };
+    const destination = channels
+      .map((id) => connectedChannels.find((c) => c.id === id))
+      .filter(Boolean)
+      .map((c) => ({ id: c.id, name: c.name, service: c.service || 'buffer' }));
+    const when = new Date(`${date}T${time}:00`);
+    try {
+      const post = await addPost({
+        clipIds: [activeClip.id],
+        channels: destination,
+        caption: text.trim(),
+        hashtags: hashtags.split(/\s+/).filter(Boolean),
+        description,
+        scheduledAt: status === 'scheduled' ? when.toISOString() : null,
+        action: status === 'scheduled' ? 'schedule' : 'draft',
+      });
+      return { post, queueId: post?.queueId || null };
+    } catch (error) {
+      toast(error.message, 'error');
+      return null;
+    }
   };
 
   return (
@@ -279,9 +291,10 @@ export default function Composer() {
                 <button
                   className="btn btn-primary w-full"
                   onClick={() => {
-                    const res = buildPost('scheduled');
+                    onClick={async () => {
+                    const res = await buildPost('scheduled');
                     if (!res) return;
-                    toast(`Added to Buffer queue as ${res.queueId}.`, 'success');
+                    toast('Post scheduled and saved to your queue.', 'success');
                     navigate('/success');
                   }}
                 >
@@ -290,10 +303,15 @@ export default function Composer() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     className="btn btn-secondary btn-sm"
-                    onClick={() => {
-                      const res = buildPost('scheduled');
+                    onClick={async () => {
+                      const res = await buildPost('scheduled');
                       if (!res) return;
-                      toast('Queued to Buffer — next available slot.', 'success');
+                      try {
+                        await sendPost(res.post.id);
+                        toast('Sent to your Buffer queue.', 'success');
+                      } catch (error) {
+                        toast(`${error.message} The post is saved as scheduled — retry it from the Publishing Queue.`, 'error');
+                      }
                       navigate('/queue');
                     }}
                   >
@@ -301,8 +319,8 @@ export default function Composer() {
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
-                    onClick={() => {
-                      const res = buildPost('draft');
+                    onClick={async () => {
+                      const res = await buildPost('draft');
                       if (!res) return;
                       toast('Saved as draft. Nothing was sent to Buffer.', 'info');
                       navigate('/calendar');
