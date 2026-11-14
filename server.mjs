@@ -7,6 +7,7 @@ import { currentUser } from './server/api.mjs';
 import { fail, clientIp } from './server/http.mjs';
 import { rateLimit } from './server/security.mjs';
 import { dirs } from './server/config.mjs';
+import { initPersistence, saveNow, storeMode } from './server/store.mjs';
 
 const root = fileURLToPath(new URL('./dist/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -114,13 +115,21 @@ server.requestTimeout = 0;
 server.headersTimeout = 65_000;
 server.keepAliveTimeout = 61_000;
 
+await initPersistence();
+
 server.listen(port, '0.0.0.0', () => {
   console.log(`TJ OpenClips AI Studio listening on 0.0.0.0:${port}`);
   console.log(`Data directory: ${dirs.data}`);
+  console.log(`Persistence: ${storeMode()}`);
 });
 
 const shutdown = () => {
   console.log('Shutting down...');
+  try {
+    saveNow();
+  } catch (error) {
+    console.error('[store] final flush failed:', error.message);
+  }
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 8000).unref();
 };

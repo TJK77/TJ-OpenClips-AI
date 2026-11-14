@@ -423,6 +423,7 @@ router.get('/api/config', async (req, res) => {
   const [ffmpeg, caps] = await Promise.all([ffmpegAvailable(), ffmpegCapabilities()]);
   return json(res, 200, {
     ...publicConfig(),
+    storage: { mode: store.storeMode() },
     ffmpegAvailable: ffmpeg,
     subtitleBurnIn: caps.subtitles,
     watermarkOverlay: caps.drawtext,
