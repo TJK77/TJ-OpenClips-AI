@@ -40,7 +40,7 @@ const SCREENS = {
 
 export default function App() {
   const { route, signedIn, navigate } = useStore();
-  const path = (route || '/').split('?')[0];
+  const path = route?.path || '/';
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
