@@ -18,7 +18,7 @@ function bytes(n) {
 }
 
 export default function ImportVideo() {
-  const { navigate, toast, projects, clips, uploadVideo, importVideoUrl, startAnalysis } = useStore();
+  const { navigate, toast, projects, clips, uploadVideo, importVideoUrl, inspectVideoUrl, startAnalysis } = useStore();
   const [mode, setMode] = useState('link');
   const [url, setUrl] = useState('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   const [file, setFile] = useState(null);
@@ -32,6 +32,7 @@ export default function ImportVideo() {
   const [targetClips, setTargetClips] = useState('8 clips');
   const [captionStyle, setCaptionStyle] = useState('Bold Viral');
   const [fetching, setFetching] = useState(false);
+  const [inspect, setInspect] = useState(null);
   const inputRef = useRef(null);
   const rawFile = useRef(null);
   const [busy, setBusy] = useState(false);
@@ -58,20 +59,43 @@ export default function ImportVideo() {
     if (f) startUpload(f);
   };
 
-  const fetchLink = () => {
-    if (!/^https?:\/\/.+\..+/.test(url.trim())) {
-      toast('Enter a valid video URL, for example a YouTube or Drive link.', 'error');
+  const fetchLink = async () => {
+    const value = url.trim();
+    if (!/^https?:\/\/.+\..+/.test(value)) {
+      toast('Enter a valid video URL, for example a YouTube or direct MP4 link.', 'error');
       return;
     }
-    setFetching(false);
-    toast('Link accepted — the server downloads and validates it when you analyse.', 'info');
+    setFetching(true);
+    setInspect(null);
+    try {
+      const result = await inspectVideoUrl({ url: value });
+      const info = result?.inspect || result;
+      setInspect(info);
+      if (info?.title && (!title || title.startsWith('How I built'))) setTitle(info.title);
+      if (info?.mediaAccessible) toast('Link verified — the server can download this file. Ready to analyse.', 'success');
+      else toast(info?.message || 'Details loaded, but this link cannot be downloaded directly.', 'info');
+    } catch (error) {
+      const info = error?.body?.inspect;
+      if (info) setInspect(info);
+      toast(error.message || 'That link could not be checked.', 'error');
+    } finally {
+      setFetching(false);
+    }
   };
 
-  const ready = mode === 'link' ? /^https?:\/\/.+\..+/.test(url.trim()) : !!file && !uploading;
+  const linkReady = Boolean(inspect && inspect.ok && inspect.mediaAccessible);
+  const ready = mode === 'link' ? linkReady : !!file && !uploading;
 
   const analyze = async (localMode = false) => {
     if (!ready || busy) {
-      toast(mode === 'link' ? 'Add a video link before analysing.' : 'Choose a video file before analysing.', 'error');
+      toast(
+        mode === 'link'
+          ? inspect
+            ? inspect.message || 'This link cannot be downloaded directly — upload the file instead.'
+            : 'Click Fetch so the server can verify the link first.'
+          : 'Choose a video file before analysing.',
+        'error'
+      );
       return;
     }
     setBusy(true);
@@ -156,6 +180,40 @@ export default function ImportVideo() {
                     <span key={s} className="chip">{s}</span>
                   ))}
                 </div>
+
+                {inspect && (
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <div className="flex items-start gap-3">
+                      {inspect.thumbnail ? (
+                        <img src={inspect.thumbnail} alt="" className="h-14 w-24 shrink-0 rounded-lg object-cover" />
+                      ) : (
+                        <span className="grid h-14 w-24 shrink-0 place-items-center rounded-lg bg-white/5 text-white/30">
+                          <Icon name="video" size={18} />
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="line-clamp-2 text-[12.5px] font-semibold leading-snug">{inspect.title || 'Untitled link'}</div>
+                        <div className="mt-0.5 truncate text-[10.5px] text-white/45">{inspect.channel || inspect.host || ''}</div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <Badge tone={inspect.mediaAccessible ? 'cyan' : 'slate'} icon={inspect.mediaAccessible ? 'check' : 'alert'}>
+                            {inspect.mediaAccessible ? 'Downloadable' : 'Not downloadable'}
+                          </Badge>
+                          {inspect.platform === 'youtube' && <span className="chip">YouTube</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[10.5px] leading-relaxed text-white/50">{inspect.message}</p>
+                    {!inspect.mediaAccessible && Array.isArray(inspect.workflows) && (
+                      <ul className="mt-1.5 space-y-1">
+                        {inspect.workflows.map((w) => (
+                          <li key={w.id} className="text-[10.5px] leading-relaxed text-white/45">
+                            <strong className="text-white/70">{w.label}:</strong> {w.detail}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="mt-4">
@@ -276,8 +334,12 @@ export default function ImportVideo() {
                   </span>
                 </div>
                 <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/85 to-transparent px-2.5 pb-2 pt-6">
-                  <span className="rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-bold">42:18</span>
-                  <span className="rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold">1080p</span>
+                  <span className="rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-bold">
+                    {inspect ? (inspect.mediaAccessible ? 'verified' : 'no media') : '—'}
+                  </span>
+                  <span className="rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold">
+                    {inspect ? (inspect.platform === 'youtube' ? 'YouTube' : 'Direct') : '—'}
+                  </span>
                 </div>
               </Thumb>
               <div className="mt-2.5 px-0.5">
@@ -285,7 +347,7 @@ export default function ImportVideo() {
                 <div className="mt-1 flex items-center gap-2 text-[10.5px] text-white/45">
                   <Icon name="globe" size={11} /> {language}
                   <span>·</span>
-                  <span>2.4 GB</span>
+                  <span>{inspect?.sizeBytes ? bytes(inspect.sizeBytes) : 'Size unknown'}</span>
                 </div>
               </div>
             </div>
@@ -312,7 +374,7 @@ export default function ImportVideo() {
           </div>
 
           <InfoNote tone="cyan" icon="shield">
-            Videos are processed for this session only. Your AI keys never leave the browser and are never shown in the UI.
+            Uploads are stored on your account on the studio server. AI provider keys are encrypted server-side and are never sent back to the browser.
           </InfoNote>
 
           <div className="card-flat p-3.5">
