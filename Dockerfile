@@ -9,6 +9,9 @@ RUN npm run build && npm prune --omit=dev
 FROM node:26-alpine
 # The date keys the build cache so this layer installs today's OS fixes; AppJet keeps it current on deploy.
 RUN echo "os-refresh 2026-11-14" && apk upgrade --no-cache
+# ffmpeg (with libass) cuts, reframes and burns subtitles; DejaVu fonts give the
+# burned-in caption styles a real typeface on this slim image.
+RUN apk add --no-cache ffmpeg fontconfig ttf-dejavu
 WORKDIR /app
 COPY --from=build /app ./
 ENV NODE_ENV=production
