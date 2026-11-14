@@ -380,7 +380,9 @@ test('api: google sign-in reports missing configuration instead of failing silen
   const config = await api('/api/config');
   assert.equal(config.body.googleConfigured, false, 'client is told the truth about Google availability');
 
-  const callback = await api('/api/auth/google/callback?code=x&state=y');
+  // The api() helper follows redirects, which would land on index.html; assert
+  // the 302 itself so the browser-facing redirect target is what gets checked.
+  const callback = await fetch(`${BASE}/api/auth/google/callback?code=x&state=y`, { redirect: 'manual' });
   assert.equal(callback.status, 302);
   assert.match(String(callback.headers.get('location')), /google=error/, 'callback refuses without configuration');
 });
