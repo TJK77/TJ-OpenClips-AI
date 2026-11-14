@@ -245,7 +245,7 @@ export default function Calendar() {
           <EmptyState
             icon="calendar"
             title="Nothing scheduled this day"
-            sub="Pick another date or compose a new post from your generated clips."
+            body="Pick another date or compose a new post from your generated clips."
             action={<button className="btn btn-secondary btn-sm" onClick={() => navigate('/composer')}><Icon name="plus" size={13} /> Compose post</button>}
           />
         )}
