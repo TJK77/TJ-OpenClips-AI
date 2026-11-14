@@ -347,3 +347,84 @@ export async function generateCaption({ provider, apiKey, model, transcript, pla
   const result = await openrouterJson(apiKey, model, system, prompt);
   return { caption: String(result.parsed?.caption || ''), hashtags: (result.parsed?.hashtags || []).map(String), model: result.model };
 }
+
+/* --- description generation (titles, SEO metadata, hashtags) --- */
+
+const STOPWORDS = new Set(
+  'the a an and or but if then than that this these those i you he she it we they me my your our their is are was were be been being do does did have has had will would can could should may might not no so very just really about into over after before from with without for of to in on at as by up out down more most much many some any what when where who why how there here them his her its'.split(
+    ' '
+  )
+);
+
+/**
+ * Deterministic, honest fallback used when no AI key is configured.
+ * Every keyword and hashtag is taken from the real transcript, so nothing is
+ * invented. It is labelled `aiGenerated: false` so the UI never claims AI ran.
+ */
+export function localDescription({ text, platform = 'tiktok' }) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  const sentences = clean.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+  const words = clean.toLowerCase().match(/[a-z0-9']{4,}/g) || [];
+  const counts = new Map();
+  for (const raw of words) {
+    const word = raw.replace(/'s$/, '');
+    if (STOPWORDS.has(word) || /^\d+$/.test(word)) continue;
+    counts.set(word, (counts.get(word) || 0) + 1);
+  }
+  const ranked = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([word]) => word);
+  const keywords = ranked.slice(0, 8);
+  const hashtags = ranked
+    .slice(0, 5)
+    .map((word) => `#${word.replace(/[^a-z0-9]/g, '')}`)
+    .filter((tag) => tag.length > 2);
+  const first = sentences[0] || clean;
+  const title = first.length > 70 ? `${first.slice(0, 67).trimEnd()}…` : first;
+  const hook = first.length > 140 ? `${first.slice(0, 137).trimEnd()}…` : first;
+  const description = (sentences.slice(0, 2).join(' ') || clean).slice(0, 380);
+  const cta =
+    platform === 'linkedin'
+      ? 'What would you add? Share your view below.'
+      : 'Follow for more clips like this.';
+  return {
+    title,
+    hook,
+    description,
+    hashtags,
+    keywords,
+    tags: keywords.slice(0, 6),
+    cta,
+    platform,
+    source: 'local-extractive',
+    aiGenerated: false,
+  };
+}
+
+function normaliseDescription(parsed, platform, model) {
+  const p = parsed || {};
+  return {
+    title: String(p.title || '').slice(0, 140),
+    hook: String(p.hook || ''),
+    description: String(p.description || ''),
+    hashtags: (Array.isArray(p.hashtags) ? p.hashtags : []).map(String),
+    keywords: (Array.isArray(p.keywords) ? p.keywords : []).map(String),
+    tags: (Array.isArray(p.tags) ? p.tags : []).map(String),
+    cta: String(p.cta || ''),
+    platform,
+    model,
+    source: 'ai',
+    aiGenerated: true,
+  };
+}
+
+export async function generateDescription({ provider, apiKey, model, transcript, platform, rules }) {
+  const prompt = `Write publish-ready metadata for ${platform || 'TikTok'} using ONLY the transcript below. Never invent facts, names, numbers, links, products or claims that are not in the transcript. ${rules || ''} Return JSON only: {"title":"max 70 chars","hook":"the spoken hook","description":"200-380 chars","hashtags":["#lowercase"],"keywords":["5-8 lowercase"],"tags":["max 6"],"cta":"one line"}.\n\nTranscript:\n${String(transcript).slice(0, 6000)}`;
+  if (provider === 'gemini') {
+    const result = await geminiJson(apiKey, model, prompt);
+    return normaliseDescription(result.parsed, platform, result.model);
+  }
+  const system = 'You write accurate short-form social metadata. Return JSON only, no commentary.';
+  const result = await openrouterJson(apiKey, model, system, prompt);
+  return normaliseDescription(result.parsed, platform, result.model);
+}

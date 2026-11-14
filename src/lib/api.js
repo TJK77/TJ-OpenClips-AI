@@ -117,10 +117,10 @@ export const api = {
   bufferAuthorize: () => request('/api/buffer/authorize'),
   bufferToken: (token) => request('/api/buffer/token', { method: 'POST', body: { token } }),
   bufferDisconnect: () => request('/api/buffer/disconnect', { method: 'POST' }),
-  bufferChannels: () => request('/api/buffer/channels'),
+  bufferChannels: () => request('/api/buffer/refresh', { method: 'POST' }),
 
   analytics: () => request('/api/analytics'),
-  captionStyle: (payload) => request('/api/clips/caption-style', { method: 'POST', body: payload }),
+  captionStyle: (payload) => request('/api/clips/apply-caption-style', { method: 'POST', body: payload }),
   generateCaption: (payload) => request('/api/ai/caption', { method: 'POST', body: payload }),
 };
 
