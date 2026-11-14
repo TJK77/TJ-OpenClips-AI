@@ -3,7 +3,7 @@ import Icon from '../lib/icons';
 import { useStore } from '../lib/store';
 import { Badge, Progress, ScoreRing, SectionHead, Avatar, InfoNote } from '../components/ui';
 import { Thumb, Waveform } from '../components/Thumb';
-import { PIPELINE_STAGES, TRANSCRIPT } from '../lib/data';
+import { PIPELINE_STAGES } from '../lib/data';
 
 const SPEAKERS = [
   { name: 'Maya', role: 'Host', hue: 262, talk: 62 },
@@ -11,36 +11,41 @@ const SPEAKERS = [
 ];
 
 export default function Analyze() {
-  const { analysis, setAnalysisStage, completeAnalysis, toast, navigate, projects, clips, providers, caption } = useStore();
+  const { analysis, pollJob, retryJob, toast, navigate, projects, clips, providers, caption } = useStore();
   const [running, setRunning] = useState(!analysis.done);
-  const project = projects[0];
-  const stage = analysis.stage;
-  const done = analysis.done || stage >= 9;
+  const project = projects.find((p) => p.id === analysis.projectId) || projects[0];
+  const stages = analysis.stages || [];
+  const stage = analysis.done ? 9 : Math.min(9, analysis.stage || 0);
+  const done = Boolean(analysis.done);
+  const failed = Boolean(analysis.failed);
   const provider = providers.find((p) => p.connected) || providers[0];
 
   useEffect(() => {
-    if (!running || analysis.done) return undefined;
-    const timer = setInterval(() => {
-      setAnalysisStage(Math.min(9, analysis.stage + 1));
-    }, 1150);
-    return () => clearInterval(timer);
-  }, [running, analysis.stage, analysis.done, setAnalysisStage]);
+    if (analysis.jobId && !analysis.done && !analysis.failed) pollJob(analysis.jobId);
+  }, [analysis.jobId, analysis.done, analysis.failed, pollJob]);
 
   useEffect(() => {
-    if (analysis.stage >= 9 && !analysis.done) {
-      completeAnalysis();
-      setRunning(false);
-      toast('Analysis complete — 8 clips ready to review.', 'success');
-    }
-  }, [analysis.stage, analysis.done, completeAnalysis, toast]);
+    if (analysis.done || analysis.failed) setRunning(false);
+  }, [analysis.done, analysis.failed]);
 
-  const pct = Math.round((Math.min(9, stage) / 9) * 100);
-  const visibleTranscript = useMemo(() => TRANSCRIPT.slice(0, Math.min(TRANSCRIPT.length, Math.max(1, stage - 1))), [stage]);
+  const pct = Math.round((stage / 9) * 100);
+  const visibleTranscript = useMemo(
+    () => stages.filter((s) => s.status !== 'pending').map((s) => ({ speaker: 'Pipeline', text: s.message || s.label })),
+    [stages]
+  );
   const moments = useMemo(() => [...clips].sort((a, b) => b.score - a.score).slice(0, 4), [clips]);
 
-  const restart = () => {
-    setAnalysisStage(0);
-    setRunning(true);
+  const restart = async () => {
+    if (!analysis.jobId) {
+      navigate('/import');
+      return;
+    }
+    try {
+      await retryJob(analysis.jobId);
+      toast('Re-running the pipeline on the server.', 'info');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
   };
 
   return (
