@@ -34,6 +34,8 @@ import {
   openrouterFreeModels,
   analyseTranscript,
   generateCaption,
+  generateDescription,
+  localDescription,
   ProviderError,
   GROQ_MODELS,
 } from './providers.mjs';
@@ -443,6 +445,7 @@ router.get('/api/state', async (req, res, ctx) => {
   const account = store.where('bufferAccounts', (b) => b.userId === userId)[0] || null;
   return json(res, 200, {
     user: userView(ctx.user),
+    settings: ctx.user.settings || {},
     stats: stats(userId),
     videos: store.where('videos', (v) => v.userId === userId).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map(videoView),
     jobs: store.where('jobs', (j) => j.userId === userId).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 20).map(jobView),
@@ -458,6 +461,149 @@ router.get('/api/state', async (req, res, ctx) => {
       lastError: account?.lastError || null,
     },
     processing: { queue: queueSize(), maxClipsPerJob: config.clipLimitPerJob, maxUploadMb: Math.round(config.maxUploadBytes / 1048576) },
+  });
+});
+
+/* --- settings & AI description generation (Phase 13) --- */
+
+const SETTINGS_KEYS = [
+  'storage', 'quality', 'autoCaptions', 'autoReframe', 'loudness', 'autoDeleteSources',
+  'emailDigest', 'publishAlerts', 'failureAlerts', 'telemetry', 'twoFactor',
+  'defaultPlatform', 'defaultAspect', 'language', 'clipLength',
+];
+
+router.patch('/api/settings', async (req, res, ctx) => {
+  if (!requireUser(ctx, res)) return;
+  const body = await readJson(req);
+  const current = ctx.user.settings && typeof ctx.user.settings === 'object' ? ctx.user.settings : {};
+  const next = { ...current };
+  for (const key of SETTINGS_KEYS) {
+    if (body[key] === undefined) continue;
+    const value = body[key];
+    if (typeof value === 'boolean' || typeof value === 'number') next[key] = value;
+    else if (typeof value === 'string') next[key] = value.slice(0, 120);
+  }
+  const user = store.update('users', ctx.user.id, { settings: next });
+  return json(res, 200, { settings: next, user: userView(user) });
+});
+
+const PLATFORM_RULES = {
+  tiktok: 'TikTok: punchy hook in the first 8 words, casual tone, 3-5 hashtags.',
+  shorts: 'YouTube Shorts: clear payoff, searchable keywords, 2-4 hashtags.',
+  reels: 'Instagram Reels: benefit-led and friendly, 4-6 hashtags.',
+  facebook: 'Facebook Reels: plain language, minimal hashtags.',
+  x: 'X: under 240 characters, one idea, at most one hashtag.',
+  linkedin: 'LinkedIn: professional and insight-first, 3 hashtags.',
+  telegram: 'Telegram: direct and informative.',
+  whatsapp: 'WhatsApp Channels: short and personal.',
+  pinterest: 'Pinterest: descriptive and searchable.',
+};
+
+function clipTranscriptText(userId, clipId) {
+  const clip = store.get('clips', clipId);
+  if (!clip || clip.userId !== userId) return null;
+  const job = store.get('jobs', clip.jobId);
+  const segments = job?.transcript?.segments || [];
+  const text = segments
+    .filter((s) => Number(s.end) >= clip.start && Number(s.start) <= clip.end)
+    .map((s) => String(s.text || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  return { clip, text };
+}
+
+function videoTranscriptText(userId, videoId) {
+  const job = store
+    .where('jobs', (j) => j.userId === userId && j.videoId === videoId && j.transcript)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  const segments = job?.transcript?.segments || [];
+  return { job, text: segments.map((s) => String(s.text || '').trim()).filter(Boolean).join(' ') };
+}
+
+router.post('/api/ai/caption', async (req, res, ctx) => {
+  if (!requireUser(ctx, res)) return;
+  if (!rateLimit(`caption:${ctx.user.id}`, 60, 10 * 60 * 1000)) {
+    return fail(res, 429, 'Too many description requests. Try again in a few minutes.');
+  }
+  const body = await readJson(req);
+  const platform = String(body.platform || 'tiktok').toLowerCase().slice(0, 24);
+  let text = '';
+  let target = '';
+
+  if (body.clipId) {
+    const found = clipTranscriptText(ctx.user.id, String(body.clipId));
+    if (!found) return fail(res, 404, 'That clip does not belong to your account.');
+    text = found.text;
+    target = `clip ${found.clip.id}`;
+    if (!text) {
+      return fail(res, 400, 'This clip has no transcript yet. Run AI analysis on the source video first.');
+    }
+  } else if (body.videoId) {
+    const found = videoTranscriptText(ctx.user.id, String(body.videoId));
+    text = found.text;
+    target = `video ${String(body.videoId)}`;
+    if (!text) return fail(res, 400, 'This video has no transcript yet. Run AI analysis on it first.');
+  } else if (body.text) {
+    text = String(body.text).slice(0, 12000);
+    target = 'transcript excerpt';
+  }
+  if (!text.trim()) {
+    return fail(res, 400, 'Provide a clip, a video with a transcript, or a transcript excerpt.');
+  }
+
+  const rules = PLATFORM_RULES[platform] || PLATFORM_RULES.tiktok;
+  const preferred = String(body.provider || '');
+  const order = [
+    ...['gemini', 'openrouter'].filter((p) => p === preferred),
+    ...['gemini', 'openrouter'].filter((p) => p !== preferred),
+  ];
+
+  let aiError = null;
+  for (const provider of order) {
+    const record = providerRecord(ctx.user.id, provider);
+    if (!record?.encryptedKey) continue;
+    const key = decryptSecret(record.encryptedKey);
+    if (!key) continue;
+    try {
+      const result = await generateDescription({
+        provider,
+        apiKey: key,
+        model: record.model || undefined,
+        transcript: text,
+        platform,
+        rules,
+      });
+      if (result.title || result.description) {
+        return json(res, 200, {
+          description: result,
+          source: 'ai',
+          provider,
+          model: result.model || record.model || '',
+          aiGenerated: true,
+          transcriptChars: text.length,
+          target,
+          platform,
+        });
+      }
+      aiError = 'The provider returned an empty description.';
+    } catch (error) {
+      aiError = error instanceof ProviderError ? error.detail || error.message : error.message;
+    }
+  }
+
+  return json(res, 200, {
+    description: localDescription({ text, platform }),
+    source: 'local-extractive',
+    provider: null,
+    model: null,
+    aiGenerated: false,
+    aiError,
+    transcriptChars: text.length,
+    target,
+    platform,
+    note: aiError
+      ? `AI provider unavailable (${aiError}). Built locally from the real transcript instead.`
+      : 'No AI provider key configured. Built locally from the real transcript instead.',
   });
 });
 
@@ -911,7 +1057,9 @@ router.post('/api/clips/:id/render', async (req, res, ctx) => {
 router.post('/api/clips/apply-caption-style', async (req, res, ctx) => {
   if (!requireUser(ctx, res)) return;
   const body = await readJson(req);
-  const ids = Array.isArray(body.clipIds) ? body.clipIds.map(String) : [];
+  const ids = Array.isArray(body.clipIds) && body.clipIds.length
+    ? body.clipIds.map(String)
+    : store.where('clips', (c) => c.userId === ctx.user.id).map((c) => c.id);
   const style = { ...DEFAULT_CAPTION_STYLE, ...(body.style || {}) };
   const results = [];
   for (const id of ids) {
