@@ -303,6 +303,7 @@ export function StoreProvider({ children }) {
         providers: mapProviders(payload.providers),
         captionStyles: payload.captionStyles || [],
         processing: payload.processing || s.processing,
+        settings: payload.settings && typeof payload.settings === 'object' ? { ...s.settings, ...payload.settings } : s.settings,
         buffer: {
           configured: Boolean(payload.buffer?.configured),
           connected: Boolean(payload.buffer?.connected),
