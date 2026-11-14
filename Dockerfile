@@ -11,7 +11,7 @@ RUN npm run build && npm prune --omit=dev
 RUN rm -rf /app/data /app/tests /app/legacy-oclip
 FROM node:26-alpine
 # The date keys the build cache so this layer installs today's OS fixes; AppJet keeps it current on deploy.
-RUN echo "os-refresh 2026-11-14" && apk upgrade --no-cache
+RUN echo "os-refresh 2026-11-14.173354" && apk upgrade --no-cache
 # ffmpeg (with libass) cuts, reframes and burns subtitles; DejaVu fonts give the
 # burned-in caption styles a real typeface on this slim image.
 RUN apk add --no-cache ffmpeg fontconfig ttf-dejavu
