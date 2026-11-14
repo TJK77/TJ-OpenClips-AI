@@ -102,7 +102,25 @@ export async function probe(input) {
   };
 }
 
+const AUDIO_CODECS = {
+  '.mp3': ['-c:a', 'libmp3lame', '-b:a', '32k'],
+  '.m4a': ['-c:a', 'aac', '-b:a', '32k'],
+  '.flac': ['-c:a', 'flac'],
+  '.wav': ['-c:a', 'pcm_s16le'],
+  '.ogg': ['-c:a', 'libopus', '-b:a', '24k'],
+};
+
+/**
+ * Extracts a mono 16 kHz track for speech-to-text. The container is chosen from
+ * the output extension so the muxer and codec always agree — writing a FLAC
+ * stream into an .m4a file makes ffmpeg abort with a muxer error.
+ * Defaults to 32 kbps mono MP3 (~14 MB/hour) so long videos stay inside
+ * Groq's free-tier 25 MB upload limit.
+ */
 export async function extractAudio(input, output) {
+  const dot = output.lastIndexOf('.');
+  const ext = dot >= 0 ? output.slice(dot).toLowerCase() : '.mp3';
+  const codec = AUDIO_CODECS[ext] || AUDIO_CODECS['.mp3'];
   await run(
     config.ffmpeg,
     [
@@ -111,7 +129,7 @@ export async function extractAudio(input, output) {
       '-vn',
       '-ac', '1',
       '-ar', '16000',
-      '-c:a', 'flac',
+      ...codec,
       '-map_metadata', '-1',
       output,
     ],

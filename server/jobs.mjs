@@ -168,7 +168,7 @@ export async function runJob(jobId) {
     update(job, { stages: stageState(job, 'extract', 'running'), stage: 'extract', progress: 10 });
     let audioPath = video.audioPath && (await exists(video.audioPath)) ? video.audioPath : null;
     if (!audioPath) {
-      audioPath = join(dirs.audio, `${video.id}.flac`);
+      audioPath = join(dirs.audio, `${video.id}.mp3`);
       await extractAudio(video.path, audioPath);
       store.update('videos', video.id, { audioPath });
     }
@@ -193,7 +193,7 @@ export async function runJob(jobId) {
     } else {
       transcript = await groqTranscribe(groqKey, {
         audioPath,
-        filename: `${video.id}.flac`,
+        filename: `${video.id}.mp3`,
         model: job.transcriptionModel || 'whisper-large-v3-turbo',
         language: job.language || 'auto',
       });

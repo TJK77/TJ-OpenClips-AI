@@ -95,7 +95,8 @@ test('video engine: buildSrt emits valid timestamped cues', () => {
   const srt = buildSrt(segments, { start: 0, end: 8 });
   assert.match(srt, /^1\r?\n00:00:00,500 --> /, 'first cue starts at 0.5s');
   assert.match(srt, /Hello and welcome back/);
-  assert.ok(srt.trim().endsWith('farm.') || srt.includes('farm.'), 'second cue text present');
+  assert.ok(srt.includes('farming.'), 'second cue text present');
+  assert.equal((srt.match(/\d{2}:\d{2}:\d{2},\d{3} --> /g) || []).length, 2, 'two cues emitted');
 });
 
 test('video engine: renderClip writes a real reframed 9:16 video with burned subtitles', async () => {

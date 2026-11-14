@@ -1094,6 +1094,15 @@ router.post('/api/posts', async (req, res, ctx) => {
   const body = await readJson(req);
   const clipIds = Array.isArray(body.clipIds) ? body.clipIds.map(String) : [];
   if (!clipIds.length) return fail(res, 400, 'Select at least one clip.');
+
+  // Validate the request shape before resolving resources so a malformed
+  // schedule is reported as a 400 rather than masked by a missing-clip 404.
+  const action = ['draft', 'schedule'].includes(body.action) ? body.action : 'draft';
+  const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : null;
+  if (action === 'schedule' && (!scheduledAt || Number.isNaN(scheduledAt.getTime()))) {
+    return fail(res, 400, 'Choose a valid publish date and time.');
+  }
+
   const clips = clipIds
     .map((id) => store.get('clips', id))
     .filter((clip) => clip && clip.userId === ctx.user.id);
@@ -1105,11 +1114,6 @@ router.post('/api/posts', async (req, res, ctx) => {
     service: String(c.service || 'unknown').slice(0, 40),
   })) : [];
 
-  const action = ['draft', 'schedule'].includes(body.action) ? body.action : 'draft';
-  const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : null;
-  if (action === 'schedule' && (!scheduledAt || Number.isNaN(scheduledAt.getTime()))) {
-    return fail(res, 400, 'Choose a valid publish date and time.');
-  }
   if (action === 'schedule' && !channels.length) return fail(res, 400, 'Select at least one destination channel.');
 
   const post = store.insert('posts', {
