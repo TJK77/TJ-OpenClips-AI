@@ -372,6 +372,19 @@ test('api: description requests are authorised and validated', async () => {
   assert.equal(anonymous.status, 401, 'no session means no generation');
 });
 
+test('api: google sign-in reports missing configuration instead of failing silently', async () => {
+  const start = await api('/api/auth/google/start');
+  assert.equal(start.status, 501, 'no OAuth client configured in this environment');
+  assert.deepEqual(start.body.needsEnvironment, ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']);
+
+  const config = await api('/api/config');
+  assert.equal(config.body.googleConfigured, false, 'client is told the truth about Google availability');
+
+  const callback = await api('/api/auth/google/callback?code=x&state=y');
+  assert.equal(callback.status, 302);
+  assert.match(String(callback.headers.get('location')), /google=error/, 'callback refuses without configuration');
+});
+
 test('api: logout invalidates the session', async () => {
   const out = await api('/api/auth/logout', { method: 'POST' });
   assert.equal(out.status, 200);

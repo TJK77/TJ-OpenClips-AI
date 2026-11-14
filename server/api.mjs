@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { config, dirs, publicConfig, bufferConfigured } from './config.mjs';
+import { config, dirs, publicConfig, bufferConfigured, googleConfigured } from './config.mjs';
 import * as store from './store.mjs';
 import {
   createRouter,
@@ -51,6 +51,7 @@ import {
   verifyClipToken,
   BufferError,
 } from './buffer.mjs';
+import { exchangeGoogleCode, GoogleError } from './google.mjs';
 
 const SESSION_COOKIE = 'oc_session';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -266,6 +267,9 @@ async function serveFile(req, res, filePath, { mime = 'application/octet-stream'
 
 const safeName = (name) => String(name || 'video').replace(/[^a-z0-9._-]+/gi, '-').slice(0, 80);
 
+const requestOrigin = (req) =>
+  `${req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'}://${req.headers.host || 'localhost'}`;
+
 async function ytdlpAvailable() {
   return new Promise((resolve) => {
     const child = spawn('yt-dlp', ['--version'], { stdio: 'ignore' });
@@ -384,6 +388,98 @@ router.post('/api/auth/logout', async (req, res) => {
   }
   setCookie(res, SESSION_COOKIE, '', { maxAge: 0, secure: isSecureRequest(req) });
   return json(res, 200, { ok: true });
+});
+
+/* --- google sign-in (activates only with real OAuth credentials) --- */
+
+router.get('/api/auth/google/start', async (req, res, ctx) => {
+  if (!googleConfigured()) {
+    return fail(res, 501, 'Google sign-in is not configured on this server.', {
+      needsEnvironment: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+      hint: 'Create a Google Cloud OAuth 2.0 Web client, add both variables in Settings → Environment variables, and register <your-domain>/api/auth/google/callback as an authorised redirect URI.',
+    });
+  }
+  store.removeWhere('oauthStates', (s) => new Date(s.expiresAt).getTime() < Date.now());
+  const state = newToken();
+  store.insert('oauthStates', {
+    provider: 'google',
+    state,
+    userId: ctx.user?.id || null,
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  });
+  const url = new URL(config.google.authorizeUrl);
+  url.searchParams.set('client_id', config.google.clientId);
+  url.searchParams.set('redirect_uri', `${requestOrigin(req)}${config.google.redirectPath}`);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'openid email profile');
+  url.searchParams.set('state', state);
+  url.searchParams.set('prompt', 'select_account');
+  res.writeHead(302, { location: url.toString() });
+  res.end();
+});
+
+router.get('/api/auth/google/callback', async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const redirect = (query) => {
+    res.writeHead(302, { location: `/#/login?${new URLSearchParams(query).toString()}` });
+    res.end();
+  };
+
+  const providerError = url.searchParams.get('error');
+  if (providerError) return redirect({ google: 'error', message: `Google returned: ${providerError}` });
+
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  if (!code || !state) {
+    return redirect({ google: 'error', message: 'Google sign-in did not return an authorization code.' });
+  }
+  if (!googleConfigured()) return redirect({ google: 'error', message: 'Google sign-in is not configured on this server.' });
+
+  const record = store.where('oauthStates', (s) => s.state === state && s.provider === 'google')[0];
+  if (!record) return redirect({ google: 'error', message: 'That sign-in attempt expired or was already used. Try again.' });
+  store.remove('oauthStates', record.id);
+  if (new Date(record.expiresAt).getTime() < Date.now()) {
+    return redirect({ google: 'error', message: 'That sign-in attempt expired. Try again.' });
+  }
+
+  let profile;
+  try {
+    profile = await exchangeGoogleCode({
+      code,
+      redirectUri: `${requestOrigin(req)}${config.google.redirectPath}`,
+    });
+  } catch (error) {
+    const detail = error instanceof GoogleError ? error.detail || error.message : error.message;
+    return redirect({ google: 'error', message: detail });
+  }
+
+  if (!profile.emailVerified) {
+    return redirect({ google: 'error', message: 'Google has not verified that email address, so sign-in was refused.' });
+  }
+
+  let user = store.where('users', (u) => u.email === profile.email)[0];
+  if (!user) {
+    user = store.insert('users', {
+      name: profile.name,
+      email: profile.email,
+      initials: initialsFor(profile.name, profile.email),
+      // Google-only accounts get an unguessable random password hash, so the
+      // email/password form cannot be used to sign in as this user.
+      passwordHash: hashPassword(newToken()),
+      authProvider: 'google',
+      googleSubject: profile.subject,
+      timezone: 'UTC',
+    });
+  } else if (user.authProvider !== 'google') {
+    store.update('users', user.id, {
+      authProvider: user.passwordHash ? 'password+google' : 'google',
+      googleSubject: profile.subject,
+    });
+  }
+
+  createSession(res, req, user.id);
+  res.writeHead(302, { location: '/#/dashboard' });
+  res.end();
 });
 
 router.get('/api/me', async (req, res, ctx) => {

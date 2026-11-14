@@ -57,6 +57,14 @@ export const config = {
   clipLimitPerJob: Math.max(1, Number(process.env.MAX_CLIPS_PER_JOB || 6)),
   ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
   ffprobe: process.env.FFPROBE_PATH || 'ffprobe',
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    authorizeUrl: process.env.GOOGLE_AUTHORIZE_URL || 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token',
+    userInfoUrl: process.env.GOOGLE_USERINFO_URL || 'https://www.googleapis.com/oauth2/v3/userinfo',
+    redirectPath: '/api/auth/google/callback',
+  },
   buffer: {
     clientId: process.env.BUFFER_CLIENT_ID || '',
     clientSecret: process.env.BUFFER_CLIENT_SECRET || '',
@@ -70,11 +78,15 @@ export const config = {
 export const bufferConfigured = () =>
   Boolean(config.buffer.clientId && config.buffer.clientSecret);
 
+export const googleConfigured = () =>
+  Boolean(config.google.clientId && config.google.clientSecret);
+
 /** Public view of configuration for the UI — never includes secret values. */
 export function publicConfig() {
   return {
     maxUploadMb: Math.round(config.maxUploadBytes / (1024 * 1024)),
     bufferConfigured: bufferConfigured(),
+    googleConfigured: googleConfigured(),
     maxClipsPerJob: config.clipLimitPerJob,
     secrets: {
       session: config.secretsSource.session,

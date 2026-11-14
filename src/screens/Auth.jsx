@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Icon from '../lib/icons';
 import { useStore } from '../lib/store';
 import { Field, Logo, TextInput, Badge } from '../components/ui';
@@ -209,12 +209,19 @@ export function Register() {
           <span className="h-px flex-1 bg-white/10" />
         </div>
         <GoogleButton
-          onClick={() =>
-            toast('Google sign-in needs a Google Cloud OAuth client, which this deployment does not have. Use email and password.', 'info')
-          }
+          onClick={() => {
+            if (engine?.googleConfigured) {
+              window.location.assign('/api/auth/google/start');
+              return;
+            }
+            toast(
+              'Google sign-in is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Settings → Environment variables, then reload. Email and password works right now.',
+              'info'
+            );
+          }}
         />
         <p className="text-center text-[10.5px] leading-relaxed text-white/35">
-          Google OAuth requires a Google Cloud client ID and secret. Email and password sign-up is fully operational.
+          Google sign-in activates as soon as a Google Cloud OAuth client is configured. Email and password sign-up is fully operational.
         </p>
       </form>
     </AuthShell>
@@ -222,12 +229,22 @@ export function Register() {
 }
 
 export function SignIn() {
-  const { login, navigate, toast } = useStore();
+  const { login, navigate, toast, engine } = useStore();
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
+
+  // Google sends the browser back to /#/login?google=error&message=... — show
+  // the real reason once instead of leaving a silent failure in the URL.
+  useEffect(() => {
+    const hash = window.location.hash || '';
+    if (!hash.includes('google=error')) return;
+    const params = new URLSearchParams(hash.split('?')[1] || '');
+    setError(params.get('message') || 'Google sign-in failed. Try again or use email and password.');
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/login`);
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -299,9 +316,16 @@ export function SignIn() {
           <span className="h-px flex-1 bg-white/10" />
         </div>
         <GoogleButton
-          onClick={() =>
-            toast('Google sign-in needs a Google Cloud OAuth client, which this deployment does not have. Use email and password.', 'info')
-          }
+          onClick={() => {
+            if (engine?.googleConfigured) {
+              window.location.assign('/api/auth/google/start');
+              return;
+            }
+            toast(
+              'Google sign-in is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Settings → Environment variables, then reload. Email and password works right now.',
+              'info'
+            );
+          }}
         />
         <button type="button" className="btn btn-ghost w-full" onClick={() => navigate('/register')}>
           Create a free account
