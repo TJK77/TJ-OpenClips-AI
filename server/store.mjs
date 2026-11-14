@@ -26,6 +26,9 @@ let chain = Promise.resolve();
 
 export const storeMode = () => mode;
 
+/** Shared Postgres pool when DATABASE_URL is active, otherwise null. */
+export const dbPool = () => pool;
+
 export const COLLECTIONS = [
   'users',
   'sessions',

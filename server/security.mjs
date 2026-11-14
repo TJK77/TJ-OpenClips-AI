@@ -8,25 +8,52 @@ import {
 } from 'node:crypto';
 import { config } from './config.mjs';
 
-const SCRYPT_N = 16384;
+/**
+ * OWASP recommends scrypt N=2^17, r=8, p=1 for password storage. scrypt needs
+ * roughly 128*N*r bytes, so N=2^17 needs ~134 MB and Node's 32 MB default
+ * maxmem would reject it — maxmem is derived from N instead of hardcoded.
+ * The work factor is embedded in every stored hash, so hashes written with the
+ * old N=2^14 still verify and are upgraded on the next successful sign-in.
+ */
+export const PASSWORD_HASH_PARAMS = { N: 131072, r: 8, p: 1 };
 const KEY_LEN = 32;
+
+const scryptMaxmem = (n) => Math.max(64 * 1024 * 1024, Math.ceil(128 * n * PASSWORD_HASH_PARAMS.r * 1.5));
+
+function parseHash(stored) {
+  const [scheme, n, saltHex, hashHex] = String(stored || '').split('$');
+  if (scheme !== 'scrypt' || !saltHex || !hashHex) return null;
+  const N = Number(n);
+  if (!Number.isInteger(N) || N < 2 || N > 2 ** 22) return null;
+  if (!/^[0-9a-f]+$/i.test(saltHex) || !/^[0-9a-f]+$/i.test(hashHex)) return null;
+  return { N, saltHex, hashHex };
+}
 
 export function hashPassword(password) {
   const salt = randomBytes(16);
-  const hash = scryptSync(String(password), salt, KEY_LEN, { N: SCRYPT_N, r: 8, p: 1 });
-  return `scrypt$${SCRYPT_N}$${salt.toString('hex')}$${hash.toString('hex')}`;
+  const { N, r, p } = PASSWORD_HASH_PARAMS;
+  const hash = scryptSync(String(password), salt, KEY_LEN, { N, r, p, maxmem: scryptMaxmem(N) });
+  return `scrypt$${N}$${salt.toString('hex')}$${hash.toString('hex')}`;
+}
+
+/** True when a stored hash uses a weaker work factor (or an unknown format). */
+export function needsRehash(stored) {
+  const parsed = parseHash(stored);
+  if (!parsed) return true;
+  return parsed.N < PASSWORD_HASH_PARAMS.N;
 }
 
 export function verifyPassword(password, stored) {
+  const parsed = parseHash(stored);
+  if (!parsed) return false;
   try {
-    const [scheme, n, saltHex, hashHex] = String(stored || '').split('$');
-    if (scheme !== 'scrypt' || !saltHex || !hashHex) return false;
-    const salt = Buffer.from(saltHex, 'hex');
-    const expected = Buffer.from(hashHex, 'hex');
+    const salt = Buffer.from(parsed.saltHex, 'hex');
+    const expected = Buffer.from(parsed.hashHex, 'hex');
     const actual = scryptSync(String(password), salt, expected.length, {
-      N: Number(n) || SCRYPT_N,
-      r: 8,
-      p: 1,
+      N: parsed.N,
+      r: PASSWORD_HASH_PARAMS.r,
+      p: PASSWORD_HASH_PARAMS.p,
+      maxmem: scryptMaxmem(parsed.N),
     });
     return actual.length === expected.length && timingSafeEqual(actual, expected);
   } catch {
@@ -34,12 +61,23 @@ export function verifyPassword(password, stored) {
   }
 }
 
-const vaultKey = () => createHash('sha256').update(`vault:${config.credentialKey}`).digest();
+/** Null when CREDENTIAL_ENCRYPTION_KEY is unavailable — never a fallback key. */
+const vaultKey = () =>
+  config.credentialKey ? createHash('sha256').update(`vault:${config.credentialKey}`).digest() : null;
 
 /** AES-256-GCM. Format: v1.<iv>.<tag>.<ciphertext> (base64url). */
 export function encryptSecret(plain) {
+  const key = vaultKey();
+  if (!key) {
+    throw Object.assign(
+      new Error(
+        'CREDENTIAL_ENCRYPTION_KEY is not configured on the server, so credentials cannot be stored. Set it in the environment and restart.'
+      ),
+      { status: 503, expose: true }
+    );
+  }
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', vaultKey(), iv);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
   return [
     'v1',
@@ -49,11 +87,14 @@ export function encryptSecret(plain) {
   ].join('.');
 }
 
+/** Returns null when the key is missing or the payload cannot be authenticated. */
 export function decryptSecret(payload) {
+  const key = vaultKey();
+  if (!key) return null;
   const [version, ivB64, tagB64, dataB64] = String(payload || '').split('.');
   if (version !== 'v1' || !ivB64 || !tagB64 || !dataB64) return null;
   try {
-    const decipher = createDecipheriv('aes-256-gcm', vaultKey(), Buffer.from(ivB64, 'base64url'));
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64url'));
     decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
     return Buffer.concat([
       decipher.update(Buffer.from(dataB64, 'base64url')),
@@ -72,26 +113,6 @@ export function maskKey(key) {
   if (!value) return '';
   if (value.length <= 10) return '••••••••';
   return `${value.slice(0, 4)}••••••••••••${value.slice(-4)}`;
-}
-
-const buckets = new Map();
-
-/** Fixed-window limiter. Returns false when the caller should be rejected. */
-export function rateLimit(key, limit, windowMs) {
-  const now = Date.now();
-  const hits = (buckets.get(key) || []).filter((t) => now - t < windowMs);
-  if (hits.length >= limit) {
-    buckets.set(key, hits);
-    return false;
-  }
-  hits.push(now);
-  buckets.set(key, hits);
-  if (buckets.size > 5000) {
-    for (const [k, v] of buckets) {
-      if (!v.length || now - v[v.length - 1] > windowMs) buckets.delete(k);
-    }
-  }
-  return true;
 }
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
