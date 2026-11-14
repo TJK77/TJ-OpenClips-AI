@@ -1,0 +1,8 @@
+{
+  "name": "oclip-free-rea",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Oclip Free by coding180: long video to captioned short clips (yt-dlp, Groq Whisper, OpenRouter, ffmpeg), with a simulated demo fallback",
+  "scripts": { "start": "node server/server.mjs" }
+}
